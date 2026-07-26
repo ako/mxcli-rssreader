@@ -17,7 +17,7 @@
  * @param $T2 Second source-tag name
  * @returns true
  */
-create microflow Feedline.SUB_LinkSourceTags (
+create or replace microflow Feedline.SUB_LinkSourceTags (
   $Source: Feedline.Source,
   $T1: string,
   $T2: string
@@ -40,7 +40,7 @@ end;
  * @param $T2 Second tag name (empty to skip)
  * @returns true
  */
-create microflow Feedline.SUB_LinkArticleTags (
+create or replace microflow Feedline.SUB_LinkArticleTags (
   $Article: Feedline.Article,
   $T1: string,
   $T2: string
@@ -76,7 +76,7 @@ end;
  * @param $SortOrder Position in the default list
  * @returns The new article
  */
-create microflow Feedline.SUB_CreateArticle (
+create or replace microflow Feedline.SUB_CreateArticle (
   $SourceSlug: string,
   $Minutes: integer,
   $TimeLabel: string,
@@ -106,6 +106,7 @@ begin
     Minutes = $Minutes,
     Words = $Words,
     TimeLabel = $TimeLabel,
+    SourceSlug = $SourceSlug,
     MetaLine = toString($Minutes) + ' min read · ' + toString($Words) + ' words · today, 07:12',
     IsRead = $IsRead,
     IsStarred = $IsStarred,
@@ -126,7 +127,7 @@ end;
  *
  * @returns true
  */
-create microflow Feedline.ACT_SeedDemoData ()
+create or replace microflow Feedline.ACT_SeedDemoData ()
 returns boolean as $ok
 folder 'Seed'
 begin
@@ -471,7 +472,7 @@ begin
     T1 = 'Long read',
     T2 = '');
 
-  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.ACT_RecalculateCounts();
   log info node 'Feedline' 'Seeded 10 feeds, 5 tags and 12 articles';
   return true;
 end;

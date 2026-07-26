@@ -17,7 +17,7 @@
  *
  * @returns true
  */
-create microflow Feedline.ACT_RecalculateCounts ()
+create or replace microflow Feedline.ACT_RecalculateCounts ()
 returns boolean as $ok
 folder 'Logic'
 begin
@@ -65,7 +65,7 @@ end;
  * @param $View The reader state
  * @returns The articles the current view should show
  */
-create microflow Feedline.DS_Articles (
+create or replace microflow Feedline.DS_Articles (
   $View: Feedline.ReaderView
 )
 returns list of Feedline.Article as $Result
@@ -146,7 +146,7 @@ end;
  * @param $View The reader state
  * @returns The feeds to show in the sidebar
  */
-create microflow Feedline.DS_Sources (
+create or replace microflow Feedline.DS_Sources (
   $View: Feedline.ReaderView
 )
 returns list of Feedline.Source as $Result
@@ -182,7 +182,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.SUB_RefreshView (
+create or replace microflow Feedline.SUB_RefreshView (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -288,18 +288,18 @@ end;
  *
  * @returns true
  */
-create microflow Feedline.ACT_OpenReader ()
+create or replace microflow Feedline.ACT_OpenReader ()
 returns boolean as $ok
 folder 'Logic'
 begin
   $View = create Feedline.ReaderView (Kind = Feedline.ViewKind.All, Query = '', LastRefresh = 'just now');
+  -- The prototype opens with the first article selected but still unread —
+  -- its header reads "12 articles · 9 unread". Reading is what clicking does.
   retrieve $First from Feedline.Article sort by Feedline.Article.SortOrder asc limit 1;
   if $First != empty then
     set $View/Feedline.ReaderView_ActiveArticle = $First;
-    change $First (IsRead = true);
-    commit $First;
   end if;
-  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.ACT_RecalculateCounts();
   call microflow Feedline.SUB_RefreshView(View = $View);
   show page Feedline.Reader(View: $View);
   return true;
@@ -313,7 +313,7 @@ end;
  * @param $Article The row that was clicked
  * @returns true
  */
-create microflow Feedline.ACT_OpenArticle (
+create or replace microflow Feedline.ACT_OpenArticle (
   $View: Feedline.ReaderView,
   $Article: Feedline.Article
 )
@@ -323,7 +323,7 @@ begin
   set $View/Feedline.ReaderView_ActiveArticle = $Article;
   change $Article (IsRead = true);
   commit $Article refresh;
-  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.ACT_RecalculateCounts();
   call microflow Feedline.SUB_RefreshView(View = $View);
   return true;
 end;
@@ -336,7 +336,7 @@ end;
  * @param $Article The article to toggle
  * @returns true
  */
-create microflow Feedline.ACT_ToggleStar (
+create or replace microflow Feedline.ACT_ToggleStar (
   $View: Feedline.ReaderView,
   $Article: Feedline.Article
 )
@@ -357,7 +357,7 @@ end;
  * @param $Article The article to toggle
  * @returns true
  */
-create microflow Feedline.ACT_ToggleSave (
+create or replace microflow Feedline.ACT_ToggleSave (
   $View: Feedline.ReaderView,
   $Article: Feedline.Article
 )
@@ -377,7 +377,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_StarActive (
+create or replace microflow Feedline.ACT_StarActive (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -400,7 +400,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_SaveActive (
+create or replace microflow Feedline.ACT_SaveActive (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -423,7 +423,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ToggleReadActive (
+create or replace microflow Feedline.ACT_ToggleReadActive (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -435,7 +435,7 @@ begin
   end if;
   change $Active (IsRead = not($Active/IsRead));
   commit $Active refresh;
-  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.ACT_RecalculateCounts();
   call microflow Feedline.SUB_RefreshView(View = $View);
   return true;
 end;
@@ -447,7 +447,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_MarkAllRead (
+create or replace microflow Feedline.ACT_MarkAllRead (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -459,7 +459,7 @@ begin
     change $A (IsRead = true);
   end loop;
   commit $List refresh;
-  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.ACT_RecalculateCounts();
   call microflow Feedline.SUB_RefreshView(View = $View);
   return true;
 end;
@@ -471,7 +471,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_NextArticle (
+create or replace microflow Feedline.ACT_NextArticle (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -493,7 +493,7 @@ begin
       set $Seen = true;
     end if;
   end loop;
-  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.ACT_RecalculateCounts();
   call microflow Feedline.SUB_RefreshView(View = $View);
   return true;
 end;
@@ -509,7 +509,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_RefreshFeeds (
+create or replace microflow Feedline.ACT_RefreshFeeds (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -532,7 +532,7 @@ end;
  * @param $Kind The view to switch to
  * @returns true
  */
-create microflow Feedline.ACT_SelectView (
+create or replace microflow Feedline.ACT_SelectView (
   $View: Feedline.ReaderView,
   $Kind: enum Feedline.ViewKind
 )
@@ -554,7 +554,7 @@ end;
  * @param $Source The feed to show
  * @returns true
  */
-create microflow Feedline.ACT_SelectSource (
+create or replace microflow Feedline.ACT_SelectSource (
   $View: Feedline.ReaderView,
   $Source: Feedline.Source
 )
@@ -576,7 +576,7 @@ end;
  * @param $Tag The tag to show
  * @returns true
  */
-create microflow Feedline.ACT_SelectTag (
+create or replace microflow Feedline.ACT_SelectTag (
   $View: Feedline.ReaderView,
   $Tag: Feedline.Tag
 )
@@ -598,7 +598,7 @@ end;
  * @param $SourceTag The chip that was clicked
  * @returns true
  */
-create microflow Feedline.ACT_SelectSourceTag (
+create or replace microflow Feedline.ACT_SelectSourceTag (
   $View: Feedline.ReaderView,
   $SourceTag: Feedline.SourceTag
 )
@@ -617,7 +617,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ClearSourceTag (
+create or replace microflow Feedline.ACT_ClearSourceTag (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -635,7 +635,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ClearView (
+create or replace microflow Feedline.ACT_ClearView (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -656,7 +656,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ApplyQuery (
+create or replace microflow Feedline.ACT_ApplyQuery (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -674,7 +674,7 @@ end;
  * @param $Tag The tag that was clicked
  * @returns true
  */
-create microflow Feedline.ACT_ToggleTag (
+create or replace microflow Feedline.ACT_ToggleTag (
   $View: Feedline.ReaderView,
   $Tag: Feedline.Tag
 )
@@ -701,7 +701,7 @@ begin
   end if;
   change $Active (Feedline.Article_Tag = $Next);
   commit $Active refresh;
-  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.ACT_RecalculateCounts();
   call microflow Feedline.SUB_RefreshView(View = $View);
   return true;
 end;
@@ -716,7 +716,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_CommitNewTag (
+create or replace microflow Feedline.ACT_CommitNewTag (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -726,18 +726,23 @@ begin
   if $Name = '' then
     return true;
   end if;
-  retrieve $Existing from Feedline.Tag where [Name = $Name] limit 1;
-  if $Existing = empty then
-    retrieve $AllTags from Feedline.Tag;
-    $TagCount = count($AllTags);
-    $Existing = create Feedline.Tag (
-      Name = $Name,
-      Slug = 'custom',
-      SortOrder = $TagCount + 1);
-    commit $Existing;
+  -- A retrieve declares its own output variable, so the "reuse or create"
+  -- branch needs two distinct names rather than one reassigned one (CE0111).
+  retrieve $Match from Feedline.Tag where [Name = $Name] limit 1;
+  if $Match != empty then
+    change $View (TagDraft = '') refresh;
+    call microflow Feedline.ACT_ToggleTag(View = $View, Tag = $Match);
+    return true;
   end if;
+  retrieve $AllTags from Feedline.Tag;
+  $TagCount = count($AllTags);
+  $NewTag = create Feedline.Tag (
+    Name = $Name,
+    Slug = 'custom',
+    SortOrder = $TagCount + 1);
+  commit $NewTag;
   change $View (TagDraft = '') refresh;
-  call microflow Feedline.ACT_ToggleTag(View = $View, Tag = $Existing);
+  call microflow Feedline.ACT_ToggleTag(View = $View, Tag = $NewTag);
   return true;
 end;
 /
@@ -749,7 +754,7 @@ end;
  * @param $Tag The tag to remove
  * @returns true
  */
-create microflow Feedline.ACT_RemoveTag (
+create or replace microflow Feedline.ACT_RemoveTag (
   $View: Feedline.ReaderView,
   $Tag: Feedline.Tag
 )
@@ -770,7 +775,7 @@ begin
   end loop;
   change $Active (Feedline.Article_Tag = $Next);
   commit $Active refresh;
-  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.ACT_RecalculateCounts();
   call microflow Feedline.SUB_RefreshView(View = $View);
   return true;
 end;
@@ -783,7 +788,7 @@ end;
  * @param $Article The row whose "＋ tag" button was pressed
  * @returns true
  */
-create microflow Feedline.ACT_OpenTagSheetFor (
+create or replace microflow Feedline.ACT_OpenTagSheetFor (
   $View: Feedline.ReaderView,
   $Article: Feedline.Article
 )

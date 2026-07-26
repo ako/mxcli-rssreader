@@ -22,17 +22,15 @@ feeds, keyboard shortcuts).
 RssReader/
   mdl/                      the MDL that builds the app — this is the source
     01-domain-model.mdl     entities, enum, associations
-    02-article-body.mdl     body paragraphs as separate attributes
-    03-seed-data.mdl        the 10 feeds / 5 tags / 12 articles from the design
-    04-logic.mdl            counters, filtered datasources, every state action
-    05-view-wrappers.mdl    per-view wrappers + the add-feed wizard steps
-    06-pages.mdl            Reader + the four popup sheets
-    07-navigation.mdl       home microflow, after-startup hook, database config
-    08-fixes.mdl            follow-ups for two mxbuild findings
-    09-open-reader.mdl      initial selection without marking read
+    02-seed-data.mdl        the 10 feeds / 5 tags / 12 articles from the design
+    03-logic.mdl            counters, filtered datasources, every state action
+    04-view-wrappers.mdl    per-view wrappers + the add-feed wizard steps
+    05-pages.mdl            Reader + the four popup sheets
+    06-navigation.mdl       home microflow, after-startup hook, database config
   theme/web/_feedline.scss  the design's tokens and components
   RssReader.mpr             the model (MPR v2, sources in mprcontents/)
 scripts/setup-tools.sh      toolchain bootstrap (see TOOLING.md)
+MXCLI-FINDINGS.md           bugs and improvement notes from building this app
 ```
 
 The `mdl/` scripts are the readable source of the app; the `.mpr` is what they
@@ -55,8 +53,8 @@ app serves at <http://127.0.0.1:8080/>.
 To change the model, edit the relevant `mdl/*.mdl` file and re-run it:
 
 ```bash
-./mxcli check mdl/06-pages.mdl -p RssReader.mpr --references
-./mxcli exec  mdl/06-pages.mdl -p RssReader.mpr
+./mxcli check mdl/05-pages.mdl -p RssReader.mpr --references
+./mxcli exec  mdl/05-pages.mdl -p RssReader.mpr
 ~/.mxcli/mxbuild/11.12.1/modeler/mx check RssReader.mpr
 ```
 

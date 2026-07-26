@@ -78,7 +78,17 @@ create persistent entity Feedline.Tag (
 create persistent entity Feedline.Article (
   Title: string(300) not null,
   Excerpt: string(1000),
-  Body: string(8000),
+  -- The detail pane renders the body as separate <p> blocks, so each paragraph
+  -- is its own attribute (and its own dynamictext with its own visibility)
+  -- rather than one blob with newlines.
+  BodyP1: string(2000),
+  BodyP2: string(2000),
+  BodyP3: string(2000),
+  BodyP4: string(2000),
+  -- Denormalised from the owning feed: a widget expression cannot traverse an
+  -- association (CE0117), and the badge tint is picked by a DynamicClasses
+  -- expression on the article itself.
+  SourceSlug: string(40),
   Minutes: integer default 0,
   Words: integer default 0,
   IsRead: boolean default false,
