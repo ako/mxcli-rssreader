@@ -27,6 +27,10 @@ RssReader/
     04-view-wrappers.mdl    per-view wrappers + the add-feed wizard steps
     05-pages.mdl            Reader + the four popup sheets
     06-navigation.mdl       home microflow, after-startup hook, database config
+    07-fetch-schema.mdl     Article.Link + per-feed fetch status
+    08-fetch-text.mdl       XML/entity/date helpers for the parser
+    09-fetch-feeds.mdl      the REST fetch, the RSS/Atom walk, dedupe
+    10-open-original.mdl    Open original + the Last fetch column
   theme/web/_feedline.scss  the design's tokens and components
   RssReader.mpr             the model (MPR v2, sources in mprcontents/)
 scripts/setup-tools.sh      toolchain bootstrap (see TOOLING.md)
@@ -58,6 +62,42 @@ To change the model, edit the relevant `mdl/*.mdl` file and re-run it:
 ~/.mxcli/mxbuild/11.12.1/modeler/mx check RssReader.mpr
 ```
 
+## Fetching real feeds
+
+**Refresh actually fetches.** `ACT_RefreshFeeds` walks the ten seeded feeds and
+for each one:
+
+1. `rest call get` the feed URL, `returns response` so the status code is known,
+   with one retry on a connection-level failure.
+2. Detect RSS (`<item>`) or Atom (`<entry>`) and walk up to 15 items.
+3. Pull title, link, summary and date, handling both dialects — RSS puts the URL
+   in `<link>`'s text and the date in `<pubDate>`; Atom uses `<link href="…"/>`
+   and `<updated>`/`<published>`.
+4. Strip CDATA, tags and entities; estimate word count and reading time.
+5. Create the article unless its `Link` is already known — so refreshing
+   repeatedly is idempotent.
+
+The parsing is plain MDL string functions (`find`, `substring`, `replaceAll`) in
+a `while` loop over the raw body. No Java action, no import mapping, and no XSD —
+which is deliberate: a schema-driven parser would not survive the malformed
+feeds that make up much of the real web.
+
+Per-feed outcomes are recorded on `Source.LastFetchStatus` and shown in the
+**Last fetch** column of Manage feeds & tags, so a failure is visible in the UI
+rather than silent. A typical run in this sandbox:
+
+```
+10 feeds checked · 85 new articles · 4 failed
+```
+
+Six feeds fetch reliably (Hacker News, Mendix, Smashing, CSS-Tricks,
+Stratechery, TechCrunch). Of the four failures, one is by design — Low-Code
+Weekly's domain is fictional, invented for the prototype, and it usefully
+exercises the error path. The other three (The Verge, Ars Technica, NRC) fail
+with connection errors **specific to this sandbox**: `curl` reaches all of them
+from the same container with identical headers, the egress proxy logs no denial,
+and the same feed sometimes succeeds. They should work in a normal network.
+
 ## Domain model
 
 ```
@@ -82,11 +122,13 @@ an aggregate each.
 - **Search runs on the `/` button, not on each keystroke.** mxcli does not
   persist a textbox `onchange`, and it drops `placeholder` — so the field has no
   placeholder text.
-- **Refresh does not fetch.** There is no feed fetcher yet; `ACT_RefreshFeeds`
-  stamps the "last refresh" label and reports what a fetch would have found.
-  Refresh is manual-only in the design, so the interaction shape is right.
-- **"Open original" opens the shortcuts sheet** — articles carry no source URL
-  of their own yet.
+- **"Open original" shows the URL in the toast instead of opening it.** The
+  right implementation is a nanoflow calling NanoflowCommons' `OpenURL`
+  JavaScript action, but mxcli persists `call javascript action` as an empty
+  activity (MXCLI-FINDINGS.md #11), so the model would not build. The link
+  itself is real — fetched, stored, and used as the dedupe key.
+- **Fetching is manual only.** Refresh is a button, as in the design; there is
+  no scheduled event. Adding one is a few lines if wanted.
 - **IBM Plex is imported from Google Fonts**, which the sandbox blocks, so
   screenshots taken here fall back to system fonts. Colour and layout are
   unaffected.

@@ -111,7 +111,7 @@ begin
     IsRead = $IsRead,
     IsStarred = $IsStarred,
     IsSaved = $IsSaved,
-    PublishedAt = [%CurrentDateTime%],
+    PublishedAt = addHours([%CurrentDateTime%], -parseInteger(replaceAll($TimeLabel, '[^0-9]', ''))),
     SortOrder = $SortOrder);
   set $Article/Feedline.Article_Source = $Source;
   commit $Article;
@@ -180,7 +180,7 @@ begin
 
   -- --- Feeds --------------------------------------------------------------
   $Verge = create Feedline.Source (Name = 'The Verge', Host = 'theverge.com',
-    FeedUrl = 'https://theverge.com/rss/index.xml', Mono = 'V', Slug = 'verge',
+    FeedUrl = 'https://www.theverge.com/rss/index.xml', Mono = 'V', Slug = 'verge',
     TagLine = 'Tech · News', SortOrder = 1);
   $Ars = create Feedline.Source (Name = 'Ars Technica', Host = 'arstechnica.com',
     FeedUrl = 'https://feeds.arstechnica.com/arstechnica/index', Mono = 'A', Slug = 'ars',
@@ -189,13 +189,13 @@ begin
     FeedUrl = 'https://news.ycombinator.com/rss', Mono = 'H', Slug = 'hn',
     TagLine = 'Dev · Community', SortOrder = 3);
   $Mendix = create Feedline.Source (Name = 'Mendix Blog', Host = 'mendix.com/blog',
-    FeedUrl = 'https://www.mendix.com/blog/feed/', Mono = 'M', Slug = 'mendix',
+    FeedUrl = 'https://www.mendix.com/feed/', Mono = 'M', Slug = 'mendix',
     TagLine = 'Low-code · Platform', SortOrder = 4);
   $Lcw = create Feedline.Source (Name = 'Low-Code Weekly', Host = 'lowcodeweekly.dev',
     FeedUrl = 'https://lowcodeweekly.dev/feed.xml', Mono = 'L', Slug = 'lcw',
     TagLine = 'Low-code · Newsletter', SortOrder = 5);
   $Nrc = create Feedline.Source (Name = 'NRC Tech', Host = 'nrc.nl/tech',
-    FeedUrl = 'https://www.nrc.nl/rss/tech', Mono = 'N', Slug = 'nrc',
+    FeedUrl = 'https://www.nrc.nl/rss/', Mono = 'N', Slug = 'nrc',
     TagLine = 'News · Dutch', SortOrder = 6);
   $Smash = create Feedline.Source (Name = 'Smashing Magazine', Host = 'smashingmagazine.com',
     FeedUrl = 'https://www.smashingmagazine.com/feed/', Mono = 'S', Slug = 'smash',

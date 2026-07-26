@@ -13,7 +13,7 @@ they are not re-reported.
 
 | | |
 |---|---|
-| mxcli | `8db91bc` (built from `ako/mxcli` `main`) |
+| mxcli | `8db91bc` for items 1–10, `0ef2446` for items 11–12 (both built from `ako/mxcli` `main`) |
 | Mendix | 11.12.1 (`mxbuild` + `mx` from the CDN) |
 | Engine | `modelsdk` (default) |
 | Platform | Linux x86-64, Go 1.26 toolchain, JDK 21 |
@@ -191,6 +191,24 @@ Both observed in this repo: the first during the initial build of
 with `create or replace`. The validation is clearly implemented and good — it
 just does not run on the create path.
 
+**The same rule has a second, much easier trigger: a microflow call's output
+variable is also a fresh declaration each time.** So the natural "try A, else
+try B" shape is invalid:
+
+```sql
+$Summary = call microflow M.Inner(Tag = 'description');
+if trim($Summary) = '' then
+  $Summary = call microflow M.Inner(Tag = 'summary');   -- CE0111
+end if;
+```
+
+Writing the feed parser hit this eight times in one file (fallback chains for
+title/link/summary/date, which RSS-vs-Atom makes unavoidable). Every one passed
+`mxcli check --references` and every one failed the build. The fix is a distinct
+variable per call plus a plain `set` to pick the winner — worth a checker rule
+and a line in `write-microflows.md`, because fallback chains are a completely
+ordinary thing to write.
+
 ---
 
 ## 6. A newline inside a property string yields a misleading diagnostic
@@ -326,7 +344,100 @@ table from the same source as the skills (or the feature registry behind
 
 ---
 
-## 11. Smaller things
+## 11. `call javascript action` parses and validates but never persists
+
+**Severity: high** — it silently produces an unbuildable model, and it blocks
+every JavaScript action, which means all of NanoflowCommons.
+
+`write-nanoflows.md` documents the syntax:
+
+```sql
+$JsResult = CALL JAVASCRIPT ACTION NanoflowCommons.SignIn (userName = $Name, password = $Pass);
+```
+
+Used exactly as documented, to open an article's URL via NanoflowCommons'
+`OpenURL`:
+
+```sql
+create or replace nanoflow Feedline.NF_OpenOriginal ($View: Feedline.ReaderView)
+returns boolean as $ok
+begin
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  $Opened = call javascript action NanoflowCommons.OpenURL(url = $Active/Link);
+  return $Opened;
+end;
+```
+
+- `mxcli check --references` → **Check passed** (it even resolves the action, so
+  the reference checker clearly knows it exists)
+- `mxcli exec` → **Created nanoflow: Feedline.NF_OpenOriginal**
+- `mx check` → `[CE0008] "No action defined." at Action activity 'Activity'` and
+  `[CE0109] "Undefined variable 'Opened'." at End event`
+
+`DESCRIBE NANOFLOW` shows why — the activity round-trips as a comment:
+
+```
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  ...
+  -- Empty action                  ← the JavaScript action call
+  return $Opened;
+```
+
+So the statement is parsed and accepted, the reference is validated, the write
+reports success, and the activity is dropped on the floor. The `$Opened`
+variable then does not exist, which is what CE0109 is really complaining about.
+
+**Impact:** anything that needs a browser-side capability is unreachable from
+MDL — opening a link, clipboard, geolocation, the whole NanoflowCommons
+library. In this app it cost the design's "Open original" button its real
+behaviour (it now shows the URL in the toast instead).
+
+**Suggestion:** if persisting `JavaScriptActionCallAction` is not implemented,
+reject the statement at check time rather than writing an empty activity — a
+clear "not yet supported" beats a model that builds green in mxcli and red in
+mxbuild.
+
+---
+
+## 12. `$latestHttpResponse` / `returns response` attribute is `Content`, not `content`
+
+**Severity: low-medium** — the docs name it wrongly and the resulting error has
+no hint.
+
+`write-microflows.md` states:
+
+> **Key attributes on `$latestHttpResponse`:**
+> - `content` (String) — response body as string
+> - `StatusCode` (Integer) — HTTP status code
+
+The lowercase spelling fails:
+
+```sql
+$Resp = rest call get '{1}' with ({1} = $Url) returns response on error continue;
+declare $Body string = $Resp/content;    -- CE0117 "Error(s) in expression."
+declare $Body string = $Resp/Content;    -- ✅
+```
+
+The model puts it on the parent entity, which is easy to miss because
+`DESCRIBE ENTITY System.HttpResponse` does not show it:
+
+```
+create or modify persistent entity System.HttpResponse extends System.HttpMessage (
+  StatusCode: Integer,
+  ReasonPhrase: String(unlimited)
+);
+create or modify non-persistent entity System.HttpMessage (
+  HttpVersion: String(unlimited),
+  Content: String(unlimited)          ← here
+);
+```
+
+Two easy wins: fix the casing in the skill, and have the CE0117 pre-check note
+that an unknown member exists on a parent entity under a different case.
+
+---
+
+## 13. Smaller things
 
 - **`mxcli new` copies a 111 MB binary into every project.** It is correctly
   gitignored, but it is a full copy per project. A wrapper script that resolves

@@ -71,7 +71,9 @@ create or replace microflow Feedline.DS_Articles (
 returns list of Feedline.Article as $Result
 folder 'Logic'
 begin
-  retrieve $All from Feedline.Article sort by Feedline.Article.SortOrder asc;
+  -- Newest first: fetched articles carry the feed's own pubDate and the demo
+  -- set is back-dated from its TimeLabel, so one ordering covers both.
+  retrieve $All from Feedline.Article sort by Feedline.Article.PublishedAt desc;
   $Result = create list of Feedline.Article;
   retrieve $FilterTag from $View/Feedline.ReaderView_SourceTag;
   retrieve $ViewSource from $View/Feedline.ReaderView_Source;
@@ -295,7 +297,7 @@ begin
   $View = create Feedline.ReaderView (Kind = Feedline.ViewKind.All, Query = '', LastRefresh = 'just now');
   -- The prototype opens with the first article selected but still unread —
   -- its header reads "12 articles · 9 unread". Reading is what clicking does.
-  retrieve $First from Feedline.Article sort by Feedline.Article.SortOrder asc limit 1;
+  retrieve $First from Feedline.Article sort by Feedline.Article.PublishedAt desc limit 1;
   if $First != empty then
     set $View/Feedline.ReaderView_ActiveArticle = $First;
   end if;
@@ -494,32 +496,6 @@ begin
     end if;
   end loop;
   call microflow Feedline.ACT_RecalculateCounts();
-  call microflow Feedline.SUB_RefreshView(View = $View);
-  return true;
-end;
-/
-
-/**
- * Simulate a manual refresh of every feed.
- *
- * Refresh is manual by design in the prototype — nothing is fetched until the
- * user asks. This app has no fetcher yet, so the action reports what a fetch
- * would have found and stamps the "last refresh" label.
- *
- * @param $View The reader state
- * @returns true
- */
-create or replace microflow Feedline.ACT_RefreshFeeds (
-  $View: Feedline.ReaderView
-)
-returns boolean as $ok
-folder 'Logic'
-begin
-  retrieve $Sources from Feedline.Source;
-  $SourceCount = count($Sources);
-  change $View (
-    LastRefresh = 'just now',
-    Toast = toString($SourceCount) + ' feeds checked · no new articles') refresh;
   call microflow Feedline.SUB_RefreshView(View = $View);
   return true;
 end;

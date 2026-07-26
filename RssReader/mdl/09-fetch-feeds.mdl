@@ -1,0 +1,335 @@
+-- ---------------------------------------------------------------------------
+-- Real feed fetching.
+--
+--   ACT_RefreshFeeds  → per feed: SUB_FetchFeed
+--   SUB_FetchFeed     → rest call get, then walk the items
+--   SUB_UpsertArticle → dedupe on Link, create when new
+--
+-- Handles RSS 2.0 (<item>, <pubDate>, <link>text</link>) and Atom
+-- (<entry>, <updated>/<published>, <link href="…"/>) — between them that is
+-- essentially every feed in the wild.
+-- ---------------------------------------------------------------------------
+
+/**
+ * Create an article if this feed has not already produced it.
+ *
+ * Dedupe is on Link, which is the only field feeds reliably keep stable across
+ * refreshes — titles get edited, GUIDs are frequently absent or non-unique.
+ * Falls back to the title when a feed emits no link at all.
+ *
+ * @param $Source The owning feed
+ * @param $Title Article headline
+ * @param $Link Article URL
+ * @param $Summary Plain-text description
+ * @param $Published Publication instant (may be empty)
+ * @param $Raw The unparsed date text, kept for diagnosis
+ * @returns true when a new article was created
+ */
+create or replace microflow Feedline.SUB_UpsertArticle (
+  $Source: Feedline.Source,
+  $Title: string,
+  $Link: string,
+  $Summary: string,
+  $Published: datetime,
+  $Raw: string
+)
+returns boolean as $IsNew
+folder 'Fetch'
+begin
+  if trim($Title) = '' then
+    return false;
+  end if;
+
+  if trim($Link) != '' then
+    retrieve $ByLink from Feedline.Article where [Link = $Link] limit 1;
+    if $ByLink != empty then
+      return false;
+    end if;
+  else
+    retrieve $ByTitle from Feedline.Article where [Title = $Title] limit 1;
+    if $ByTitle != empty then
+      return false;
+    end if;
+  end if;
+
+  -- Attribute lengths are enforced by the runtime, and feed titles routinely
+  -- run long, so everything is truncated to fit rather than risking a failed
+  -- commit mid-fetch.
+  declare $SafeTitle string = $Title;
+  if length($SafeTitle) > 295 then
+    set $SafeTitle = substring($SafeTitle, 0, 292) + '…';
+  end if;
+  declare $SafeLink string = $Link;
+  if length($SafeLink) > 995 then
+    set $SafeLink = substring($SafeLink, 0, 995);
+  end if;
+  declare $Excerpt string = $Summary;
+  if length($Excerpt) > 480 then
+    set $Excerpt = substring($Excerpt, 0, 477) + '…';
+  end if;
+  -- The detail pane renders Excerpt as the lead and BodyP1 as the first
+  -- paragraph. When the whole summary already fits in the excerpt they would
+  -- render identically, so the body is left empty and the lead stands alone.
+  declare $Body string = '';
+  if length($Summary) > 480 then
+    set $Body = $Summary;
+    if length($Body) > 1900 then
+      set $Body = substring($Body, 0, 1900);
+    end if;
+  end if;
+
+  declare $When datetime = $Published;
+  if $When = empty then
+    set $When = [%CurrentDateTime%];
+  end if;
+
+  -- Feed summaries carry no word count, so it is estimated from the text at
+  -- roughly six characters per word and 200 words per minute.
+  declare $Words integer = round(length($Summary) div 6);
+  if $Words < 40 then
+    set $Words = 40;
+  end if;
+  declare $Minutes integer = round($Words div 200);
+  if $Minutes < 1 then
+    set $Minutes = 1;
+  end if;
+
+  $Label = call microflow Feedline.SUB_RelativeLabel(When = $When);
+
+  $Article = create Feedline.Article (
+    Title = $SafeTitle,
+    Link = $SafeLink,
+    Excerpt = $Excerpt,
+    BodyP1 = $Body,
+    BodyP2 = '',
+    BodyP3 = '',
+    BodyP4 = '',
+    Minutes = $Minutes,
+    Words = $Words,
+    TimeLabel = $Label,
+    PubDateRaw = $Raw,
+    SourceSlug = $Source/Slug,
+    MetaLine = toString($Minutes) + ' min read · ' + toString($Words) + ' words · ' + $Label,
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = false,
+    PublishedAt = $When,
+    SortOrder = 0);
+  set $Article/Feedline.Article_Source = $Source;
+  commit $Article;
+  return true;
+end;
+/
+
+/**
+ * Fetch one feed and add whatever is new.
+ *
+ * The HTTP call is `on error continue` so one unreachable feed does not abort
+ * the whole refresh — the failure is recorded on the Source and reported in
+ * Manage feeds & tags.
+ *
+ * @param $Source The feed to fetch
+ * @returns Number of articles added
+ */
+create or replace microflow Feedline.SUB_FetchFeed (
+  $Source: Feedline.Source
+)
+returns integer as $New
+folder 'Fetch'
+begin
+  declare $New integer = 0;
+  if trim($Source/FeedUrl) = '' then
+    change $Source (LastFetchStatus = 'no feed URL', LastFetchNew = 0);
+    commit $Source;
+    return 0;
+  end if;
+
+  -- `returns response` rather than `returns string`: the HttpResponse carries
+  -- the status code, so a 403 or 404 is reported as such instead of collapsing
+  -- into a generic "unreachable".
+  $Resp = rest call get '{1}' with (
+      {1} = $Source/FeedUrl
+    )
+    header Accept = 'application/rss+xml, application/atom+xml, application/xml, text/xml'
+    header 'User-Agent' = 'Feedline/1.0 (+mxcli)'
+    timeout 30
+    returns response
+    on error continue;
+
+  -- One retry on a connection-level failure. Feed endpoints drop connections
+  -- often enough that a single retry meaningfully changes the hit rate, and a
+  -- second output variable is required anyway (each REST call declares its own,
+  -- so reusing $Resp would be CE0111).
+  declare $Code integer = 0;
+  declare $Body string = '';
+  if $Resp != empty then
+    set $Code = $Resp/StatusCode;
+    set $Body = $Resp/Content;
+  else
+    $Retry = rest call get '{1}' with (
+        {1} = $Source/FeedUrl
+      )
+      header Accept = 'application/rss+xml, application/atom+xml, application/xml, text/xml'
+      header 'User-Agent' = 'Feedline/1.0 (+mxcli)'
+      timeout 30
+      returns response
+      on error continue;
+    if $Retry != empty then
+      set $Code = $Retry/StatusCode;
+      set $Body = $Retry/Content;
+    end if;
+  end if;
+
+  if $Code = 0 then
+    change $Source (LastFetchStatus = 'no response after retry (connection failed)', LastFetchNew = 0);
+    commit $Source;
+    return 0;
+  end if;
+
+  if $Code < 200 or $Code > 299 then
+    change $Source (LastFetchStatus = 'HTTP ' + toString($Code), LastFetchNew = 0);
+    commit $Source;
+    return 0;
+  end if;
+  if $Body = empty or length($Body) < 40 then
+    change $Source (LastFetchStatus = 'HTTP ' + toString($Code) + ' but empty body', LastFetchNew = 0);
+    commit $Source;
+    return 0;
+  end if;
+
+  -- RSS uses <item>, Atom uses <entry>.
+  declare $ItemTag string = 'item';
+  if find($Body, '<item') < 0 then
+    set $ItemTag = 'entry';
+  end if;
+  if find($Body, '<' + $ItemTag) < 0 then
+    change $Source (LastFetchStatus = 'no items found (not RSS or Atom?)', LastFetchNew = 0);
+    commit $Source;
+    return 0;
+  end if;
+
+  declare $Cursor integer = 0;
+  declare $Seen integer = 0;
+  -- Cap the work per refresh: feeds can carry hundreds of items and this is a
+  -- reader, not an archiver.
+  while $Seen < 15
+  begin
+    declare $Start integer = find($Body, '<' + $ItemTag, $Cursor);
+    if $Start < 0 then
+      set $Seen = 15;
+    else
+      declare $End integer = find($Body, '</' + $ItemTag + '>', $Start);
+      if $End < 0 then
+        set $Seen = 15;
+      else
+        set $Seen = $Seen + 1;
+        set $Cursor = $End + 1;
+        declare $Block string = substring($Body, $Start, $End - $Start);
+
+        $RawTitle = call microflow Feedline.SUB_InnerText(Xml = $Block, Tag = 'title');
+        $Title = call microflow Feedline.SUB_StripHtml(S = $RawTitle);
+
+        -- RSS puts the URL in <link>'s text; Atom puts it in a href attribute.
+        $LinkText = call microflow Feedline.SUB_InnerText(Xml = $Block, Tag = 'link');
+        $LinkHref = call microflow Feedline.SUB_LinkHref(Xml = $Block);
+        declare $Link string = $LinkText;
+        if trim($Link) = '' then
+          set $Link = $LinkHref;
+        end if;
+
+        $DescText = call microflow Feedline.SUB_InnerText(Xml = $Block, Tag = 'description');
+        $SummText = call microflow Feedline.SUB_InnerText(Xml = $Block, Tag = 'summary');
+        $ContText = call microflow Feedline.SUB_InnerText(Xml = $Block, Tag = 'content');
+        declare $RawSummary string = $DescText;
+        if trim($RawSummary) = '' then
+          set $RawSummary = $SummText;
+        end if;
+        if trim($RawSummary) = '' then
+          set $RawSummary = $ContText;
+        end if;
+        $Summary = call microflow Feedline.SUB_StripHtml(S = $RawSummary);
+
+        $DatePub = call microflow Feedline.SUB_InnerText(Xml = $Block, Tag = 'pubDate');
+        $DateUpd = call microflow Feedline.SUB_InnerText(Xml = $Block, Tag = 'updated');
+        $DatePubd = call microflow Feedline.SUB_InnerText(Xml = $Block, Tag = 'published');
+        declare $RawDate string = $DatePub;
+        if trim($RawDate) = '' then
+          set $RawDate = $DateUpd;
+        end if;
+        if trim($RawDate) = '' then
+          set $RawDate = $DatePubd;
+        end if;
+
+        -- SUB_ParseFeedDate absorbs a format mismatch and returns empty; an
+        -- unparseable date leaves the article stamped with the fetch time.
+        $When = call microflow Feedline.SUB_ParseFeedDate(Raw = $RawDate);
+
+        $Added = call microflow Feedline.SUB_UpsertArticle(
+          Source = $Source,
+          Title = $Title,
+          Link = $Link,
+          Summary = $Summary,
+          Published = $When,
+          Raw = $RawDate);
+        if $Added then
+          set $New = $New + 1;
+        end if;
+      end if;
+    end if;
+  end while;
+
+  change $Source (
+    LastFetchStatus = 'ok · ' + toString($New) + ' new',
+    LastFetchNew = $New);
+  commit $Source;
+  return $New;
+end;
+/
+
+/**
+ * Refresh every feed — the topbar's Refresh button.
+ *
+ * Replaces the simulated version: this actually fetches over HTTP and reports
+ * what came back.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_RefreshFeeds (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Sources from Feedline.Source;
+  $SourceCount = count($Sources);
+  declare $Total integer = 0;
+  declare $Failed integer = 0;
+  -- No error handling on this call: `on error continue` is rejected inside a
+  -- loop (CE0644), so SUB_FetchFeed is written never to throw — it absorbs the
+  -- HTTP failure itself and reports through LastFetchStatus.
+  loop $Source in $Sources
+  begin
+    $Added = call microflow Feedline.SUB_FetchFeed(Source = $Source);
+    set $Total = $Total + $Added;
+    if not(startsWith($Source/LastFetchStatus, 'ok')) then
+      set $Failed = $Failed + 1;
+    end if;
+  end loop;
+
+  declare $Msg string = toString($SourceCount) + ' feeds checked · ';
+  if $Total = 1 then
+    set $Msg = $Msg + '1 new article';
+  else
+    set $Msg = $Msg + toString($Total) + ' new articles';
+  end if;
+  if $Failed > 0 then
+    set $Msg = $Msg + ' · ' + toString($Failed) + ' failed';
+  end if;
+
+  change $View (LastRefresh = 'just now', Toast = $Msg) refresh;
+  call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/

@@ -1,0 +1,72 @@
+-- ---------------------------------------------------------------------------
+-- "Open original" now has somewhere to point.
+--
+-- The right implementation is a nanoflow calling NanoflowCommons' OpenURL
+-- JavaScript action — opening a link is a browser action. mxcli parses
+-- `call javascript action` (it is the documented syntax, and it passes
+-- `check --references`) but persists it as an empty activity, which fails the
+-- build with CE0008/CE0109. See MXCLI-FINDINGS.md #12.
+--
+-- Until that is fixed the button surfaces the URL in the toast strip, where it
+-- can be read and copied. Everything else about the link is real: it is
+-- fetched, stored, and used as the dedupe key.
+-- ---------------------------------------------------------------------------
+
+/**
+ * Show the active article's own URL.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_ShowOriginalUrl (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  if $Active = empty or trim($Active/Link) = '' then
+    change $View (Toast = 'This article has no source URL') refresh;
+    return true;
+  end if;
+  change $View (Toast = $Active/Link) refresh;
+  return true;
+end;
+/
+
+/**
+ * Point the detail bar's button at it.
+ */
+alter page Feedline.Reader {
+  replace btnOpenOriginal with {
+    actionbutton btnOpenOriginal (
+      caption: '↗ Open original',
+      action: microflow Feedline.ACT_ShowOriginalUrl,
+      class: 'fl-btn fl-btn--ghost'
+    )
+  }
+};
+/
+
+/**
+ * The Manage sheet's "Refresh" column showed a static 'Manual only'. With real
+ * fetching it becomes the useful thing: how the last fetch went, per feed.
+ */
+alter page Feedline.ManageFeeds {
+  replace mInterval with {
+    dynamictext mInterval (attribute: LastFetchStatus, class: 'fl-grid-interval')
+  }
+};
+/
+
+-- `set … on <widget>` is rejected for built-in widgets on an MDL-created page
+-- (MXCLI-FINDINGS.md #1), so the header cell is replaced instead.
+alter page Feedline.ManageFeeds {
+  replace colRefresh with {
+    dynamictext colRefresh (content: 'Last fetch')
+  }
+};
+/
+
+drop nanoflow Feedline.NF_OpenOriginal;
+/
