@@ -1,0 +1,50 @@
+# --- Build artifacts -------------------------------------------------------
+bin/
+dist/
+build/
+*.exe
+*.test
+*.out
+
+# --- mxcli / Mendix local caches -------------------------------------------
+.mxcli/
+mxbuild/
+deployment/
+javasource/**/*.class
+.mendix-cache/
+*.mda
+*.mpk
+
+# --- Mendix project scratch ------------------------------------------------
+# Real project sources are committed once the app is scaffolded; these are the
+# local/derived files Studio Pro and mxbuild leave behind.
+*.mpr.bak
+*.mpr.lock
+*.mpr-journal
+*.mpr.local
+*.launch
+modelsource-backup/
+
+# --- Databases -------------------------------------------------------------
+pgdata/
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Node / Playwright -----------------------------------------------------
+node_modules/
+playwright-report/
+test-results/
+.playwright/
+screenshots/
+*.log
+
+# --- Editors / OS ----------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Local-only agent state ------------------------------------------------
+.claude/settings.local.json
+.claude/local/
