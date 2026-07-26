@@ -1,0 +1,37 @@
+-- ---------------------------------------------------------------------------
+-- Wiring: where the app starts, and what runs on boot.
+--
+-- Home is a microflow rather than a page because the Reader needs its
+-- non-persistent ReaderView built (and an article selected) before the page
+-- can open.
+-- ---------------------------------------------------------------------------
+
+create or replace navigation Responsive
+  home microflow Feedline.ACT_OpenReader
+  menu (
+    menu item 'Reader' microflow Feedline.ACT_OpenReader;
+    menu item 'Manage feeds' page Feedline.ManageFeeds;
+  )
+;
+/
+
+/**
+ * Seed the demo dataset on first boot.
+ */
+alter settings model
+  AfterStartupMicroflow = 'Feedline.ACT_SeedDemoData';
+/
+
+/**
+ * mxcli run --local drives a standalone runtime against a local PostgreSQL,
+ * so the project points at the devcontainer's server rather than the default
+ * in-memory HSQLDB. `--ensure-db` provisions the role and database.
+ */
+alter settings configuration 'Default'
+  DatabaseType = 'PostgreSql',
+  DatabaseUrl = '127.0.0.1:5432',
+  DatabaseName = 'rssreader',
+  DatabaseUserName = 'mendix',
+  DatabasePassword = 'mendix',
+  HttpPortNumber = 8080;
+/

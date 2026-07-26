@@ -1,0 +1,798 @@
+-- ---------------------------------------------------------------------------
+-- Reader logic: denormalised counters, the filtered list datasources, and the
+-- state actions behind every clickable thing in the design.
+--
+-- The prototype keeps all of this in React state. Here it lives on a
+-- non-persistent ReaderView object that the page takes as its parameter, so
+-- every action is "change the view, refresh the labels, re-run the datasource".
+-- ---------------------------------------------------------------------------
+
+/**
+ * Recompute the denormalised article counters on feeds and tags.
+ *
+ * The sidebar shows an unread count per feed and the tag sheet shows a tagged
+ * count per tag. Storing them beats an aggregate per row, and they only move
+ * when read state or tagging changes — so every action that does either calls
+ * this.
+ *
+ * @returns true
+ */
+create microflow Feedline.ACT_RecalculateCounts ()
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Sources from Feedline.Source;
+  $DirtySources = create list of Feedline.Source;
+  loop $Source in $Sources
+  begin
+    retrieve $Arts from $Source/Feedline.Article_Source;
+    declare $Unread integer = 0;
+    declare $Total integer = 0;
+    loop $Art in $Arts
+    begin
+      set $Total = $Total + 1;
+      if not($Art/IsRead) then
+        set $Unread = $Unread + 1;
+      end if;
+    end loop;
+    change $Source (UnreadCount = $Unread, ArticleCount = $Total);
+    add $Source to $DirtySources;
+  end loop;
+  commit $DirtySources;
+
+  retrieve $Tags from Feedline.Tag;
+  $DirtyTags = create list of Feedline.Tag;
+  loop $Tag in $Tags
+  begin
+    retrieve $TagArts from $Tag/Feedline.Article_Tag;
+    $TagArtCount = count($TagArts);
+    change $Tag (ArticleCount = $TagArtCount);
+    add $Tag to $DirtyTags;
+  end loop;
+  commit $DirtyTags;
+  return true;
+end;
+/
+
+/**
+ * The middle pane's article list — the prototype's listFor(state).
+ *
+ * Applies, in order: the sidebar source-tag chip, the selected smart view or
+ * feed or tag, and the search box. Twelve demo articles make an in-memory
+ * filter the honest choice here; a real feed volume would push the view kinds
+ * into XPath constraints.
+ *
+ * @param $View The reader state
+ * @returns The articles the current view should show
+ */
+create microflow Feedline.DS_Articles (
+  $View: Feedline.ReaderView
+)
+returns list of Feedline.Article as $Result
+folder 'Logic'
+begin
+  retrieve $All from Feedline.Article sort by Feedline.Article.SortOrder asc;
+  $Result = create list of Feedline.Article;
+  retrieve $FilterTag from $View/Feedline.ReaderView_SourceTag;
+  retrieve $ViewSource from $View/Feedline.ReaderView_Source;
+  retrieve $ViewTag from $View/Feedline.ReaderView_Tag;
+  declare $Query string = toLowerCase(trim($View/Query));
+
+  loop $Art in $All
+  begin
+    declare $Keep boolean = true;
+    retrieve $Src from $Art/Feedline.Article_Source;
+
+    if $FilterTag != empty then
+      retrieve $SrcTags from $Src/Feedline.Source_SourceTag;
+      declare $HasSourceTag boolean = false;
+      loop $St in $SrcTags
+      begin
+        if $St = $FilterTag then
+          set $HasSourceTag = true;
+        end if;
+      end loop;
+      if not($HasSourceTag) then
+        set $Keep = false;
+      end if;
+    end if;
+
+    -- An if-chain rather than a case: a Mendix enumeration split has no default
+    -- branch, and ViewKind.All simply keeps everything.
+    if $View/Kind = Feedline.ViewKind.Unread and $Art/IsRead then
+      set $Keep = false;
+    end if;
+    if $View/Kind = Feedline.ViewKind.Starred and not($Art/IsStarred) then
+      set $Keep = false;
+    end if;
+    if $View/Kind = Feedline.ViewKind.Saved and not($Art/IsSaved) then
+      set $Keep = false;
+    end if;
+    if $View/Kind = Feedline.ViewKind.Source and $Src != $ViewSource then
+      set $Keep = false;
+    end if;
+    if $View/Kind = Feedline.ViewKind.Tag then
+      retrieve $ArtTags from $Art/Feedline.Article_Tag;
+      declare $HasTag boolean = false;
+      loop $At in $ArtTags
+      begin
+        if $At = $ViewTag then
+          set $HasTag = true;
+        end if;
+      end loop;
+      if not($HasTag) then
+        set $Keep = false;
+      end if;
+    end if;
+
+    if $Query != '' then
+      declare $Hay string = toLowerCase($Art/Title + ' ' + $Art/Excerpt + ' ' + $Src/Name);
+      if not(contains($Hay, $Query)) then
+        set $Keep = false;
+      end if;
+    end if;
+
+    if $Keep then
+      add $Art to $Result;
+    end if;
+  end loop;
+  return $Result;
+end;
+/
+
+/**
+ * The sidebar feed list, narrowed by the source-tag chip row.
+ *
+ * @param $View The reader state
+ * @returns The feeds to show in the sidebar
+ */
+create microflow Feedline.DS_Sources (
+  $View: Feedline.ReaderView
+)
+returns list of Feedline.Source as $Result
+folder 'Logic'
+begin
+  retrieve $All from Feedline.Source sort by Feedline.Source.SortOrder asc;
+  retrieve $FilterTag from $View/Feedline.ReaderView_SourceTag;
+  if $FilterTag = empty then
+    return $All;
+  end if;
+  $Result = create list of Feedline.Source;
+  loop $Source in $All
+  begin
+    retrieve $SrcTags from $Source/Feedline.Source_SourceTag;
+    loop $St in $SrcTags
+    begin
+      if $St = $FilterTag then
+        add $Source to $Result;
+      end if;
+    end loop;
+  end loop;
+  return $Result;
+end;
+/
+
+/**
+ * Recompute the header labels and smart-view counters after any state change.
+ *
+ * Mirrors the prototype's renderVals(): the list title, the
+ * "N articles · M unread" subtitle, the four smart-view counts, the feed count
+ * label, and the "Next in this view" teaser.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.SUB_RefreshView (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $AllArticles from Feedline.Article;
+  declare $Unread integer = 0;
+  declare $Starred integer = 0;
+  declare $Saved integer = 0;
+  loop $A in $AllArticles
+  begin
+    if not($A/IsRead) then
+      set $Unread = $Unread + 1;
+    end if;
+    if $A/IsStarred then
+      set $Starred = $Starred + 1;
+    end if;
+    if $A/IsSaved then
+      set $Saved = $Saved + 1;
+    end if;
+  end loop;
+
+  $List = call microflow Feedline.DS_Articles(View = $View);
+  declare $ListUnread integer = 0;
+  loop $L in $List
+  begin
+    if not($L/IsRead) then
+      set $ListUnread = $ListUnread + 1;
+    end if;
+  end loop;
+
+  -- List title follows the selected view.
+  declare $Title string = 'All articles';
+  if $View/Kind = Feedline.ViewKind.Unread then
+    set $Title = 'Unread';
+  end if;
+  if $View/Kind = Feedline.ViewKind.Starred then
+    set $Title = 'Starred';
+  end if;
+  if $View/Kind = Feedline.ViewKind.Saved then
+    set $Title = 'Read later';
+  end if;
+  if $View/Kind = Feedline.ViewKind.Source then
+    retrieve $S from $View/Feedline.ReaderView_Source;
+    set $Title = $S/Name;
+  end if;
+  if $View/Kind = Feedline.ViewKind.Tag then
+    retrieve $T from $View/Feedline.ReaderView_Tag;
+    set $Title = 'Tagged “' + $T/Name + '”';
+  end if;
+
+  declare $Sub string = '';
+  if trim($View/Query) != '' then
+    set $Sub = 'matching “' + trim($View/Query) + '” · ';
+  end if;
+  $ListCount = count($List);
+  declare $Plural string = ' articles · ';
+  if $ListCount = 1 then
+    set $Plural = ' article · ';
+  end if;
+  set $Sub = $Sub + toString($ListCount) + $Plural + toString($ListUnread) + ' unread';
+
+  $Sources = call microflow Feedline.DS_Sources(View = $View);
+  retrieve $AllSources from Feedline.Source;
+  $VisibleSourceCount = count($Sources);
+  $TotalSourceCount = count($AllSources);
+  $AllArticleCount = count($AllArticles);
+
+  -- "Next in this view" — the article after the active one.
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  declare $Next string = 'End of this view';
+  declare $Seen boolean = false;
+  declare $Found boolean = false;
+  loop $L2 in $List
+  begin
+    if $Seen and not($Found) then
+      set $Next = $L2/Title;
+      set $Found = true;
+    end if;
+    if $Active != empty and $L2 = $Active then
+      set $Seen = true;
+    end if;
+  end loop;
+
+  change $View (
+    ListTitle = $Title,
+    ListSub = $Sub,
+    CountAll = $AllArticleCount,
+    CountUnread = $Unread,
+    CountStarred = $Starred,
+    CountSaved = $Saved,
+    SourceCountLabel = toString($VisibleSourceCount) + ' of ' + toString($TotalSourceCount),
+    NextTitle = $Next) refresh;
+  return true;
+end;
+/
+
+/**
+ * Build the reader state and open the app.
+ *
+ * The home microflow: seeds nothing, creates the non-persistent view, selects
+ * the newest article so the detail pane is never empty, and shows the page.
+ *
+ * @returns true
+ */
+create microflow Feedline.ACT_OpenReader ()
+returns boolean as $ok
+folder 'Logic'
+begin
+  $View = create Feedline.ReaderView (Kind = Feedline.ViewKind.All, Query = '', LastRefresh = 'just now');
+  retrieve $First from Feedline.Article sort by Feedline.Article.SortOrder asc limit 1;
+  if $First != empty then
+    set $View/Feedline.ReaderView_ActiveArticle = $First;
+    change $First (IsRead = true);
+    commit $First;
+  end if;
+  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  show page Feedline.Reader(View: $View);
+  return true;
+end;
+/
+
+/**
+ * Open an article in the detail pane and mark it read — the prototype's open().
+ *
+ * @param $View The reader state
+ * @param $Article The row that was clicked
+ * @returns true
+ */
+create microflow Feedline.ACT_OpenArticle (
+  $View: Feedline.ReaderView,
+  $Article: Feedline.Article
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  set $View/Feedline.ReaderView_ActiveArticle = $Article;
+  change $Article (IsRead = true);
+  commit $Article refresh;
+  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Star / unstar a specific article (the ☆ button on a list row).
+ *
+ * @param $View The reader state
+ * @param $Article The article to toggle
+ * @returns true
+ */
+create microflow Feedline.ACT_ToggleStar (
+  $View: Feedline.ReaderView,
+  $Article: Feedline.Article
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  change $Article (IsStarred = not($Article/IsStarred));
+  commit $Article refresh;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Toggle read-later on a specific article (the ⌷ button on a list row).
+ *
+ * @param $View The reader state
+ * @param $Article The article to toggle
+ * @returns true
+ */
+create microflow Feedline.ACT_ToggleSave (
+  $View: Feedline.ReaderView,
+  $Article: Feedline.Article
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  change $Article (IsSaved = not($Article/IsSaved));
+  commit $Article refresh;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Star / unstar the article open in the detail pane.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_StarActive (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  if $Active = empty then
+    return true;
+  end if;
+  change $Active (IsStarred = not($Active/IsStarred));
+  commit $Active refresh;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Toggle read-later on the article open in the detail pane.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_SaveActive (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  if $Active = empty then
+    return true;
+  end if;
+  change $Active (IsSaved = not($Active/IsSaved));
+  commit $Active refresh;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Flip the read state of the article open in the detail pane.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_ToggleReadActive (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  if $Active = empty then
+    return true;
+  end if;
+  change $Active (IsRead = not($Active/IsRead));
+  commit $Active refresh;
+  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Mark every article in the current view as read.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_MarkAllRead (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  $List = call microflow Feedline.DS_Articles(View = $View);
+  loop $A in $List
+  begin
+    change $A (IsRead = true);
+  end loop;
+  commit $List refresh;
+  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Advance to the next article in the current view (the Next / J action).
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_NextArticle (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  $List = call microflow Feedline.DS_Articles(View = $View);
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  declare $Seen boolean = false;
+  declare $Moved boolean = false;
+  loop $A in $List
+  begin
+    if $Seen and not($Moved) then
+      set $View/Feedline.ReaderView_ActiveArticle = $A;
+      change $A (IsRead = true);
+      commit $A;
+      set $Moved = true;
+    end if;
+    if $Active != empty and $A = $Active then
+      set $Seen = true;
+    end if;
+  end loop;
+  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Simulate a manual refresh of every feed.
+ *
+ * Refresh is manual by design in the prototype — nothing is fetched until the
+ * user asks. This app has no fetcher yet, so the action reports what a fetch
+ * would have found and stamps the "last refresh" label.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_RefreshFeeds (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Sources from Feedline.Source;
+  $SourceCount = count($Sources);
+  change $View (
+    LastRefresh = 'just now',
+    Toast = toString($SourceCount) + ' feeds checked · no new articles') refresh;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Select one of the four smart views (All / Unread / Starred / Read later).
+ *
+ * @param $View The reader state
+ * @param $Kind The view to switch to
+ * @returns true
+ */
+create microflow Feedline.ACT_SelectView (
+  $View: Feedline.ReaderView,
+  $Kind: enum Feedline.ViewKind
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  change $View (Kind = $Kind) refresh;
+  set $View/Feedline.ReaderView_Source = empty;
+  set $View/Feedline.ReaderView_Tag = empty;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Filter the list to a single feed (clicking a row in the sidebar).
+ *
+ * @param $View The reader state
+ * @param $Source The feed to show
+ * @returns true
+ */
+create microflow Feedline.ACT_SelectSource (
+  $View: Feedline.ReaderView,
+  $Source: Feedline.Source
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  change $View (Kind = Feedline.ViewKind.Source) refresh;
+  set $View/Feedline.ReaderView_Source = $Source;
+  set $View/Feedline.ReaderView_Tag = empty;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Filter the list to a single article tag (clicking a chip on a row).
+ *
+ * @param $View The reader state
+ * @param $Tag The tag to show
+ * @returns true
+ */
+create microflow Feedline.ACT_SelectTag (
+  $View: Feedline.ReaderView,
+  $Tag: Feedline.Tag
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  change $View (Kind = Feedline.ViewKind.Tag) refresh;
+  set $View/Feedline.ReaderView_Tag = $Tag;
+  set $View/Feedline.ReaderView_Source = empty;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Apply the sidebar source-tag chip.
+ *
+ * @param $View The reader state
+ * @param $SourceTag The chip that was clicked
+ * @returns true
+ */
+create microflow Feedline.ACT_SelectSourceTag (
+  $View: Feedline.ReaderView,
+  $SourceTag: Feedline.SourceTag
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  set $View/Feedline.ReaderView_SourceTag = $SourceTag;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Clear the source-tag chip back to "All".
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_ClearSourceTag (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  set $View/Feedline.ReaderView_SourceTag = empty;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Reset view, search box and chip filter — the Clear button in the list header.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_ClearView (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  change $View (Kind = Feedline.ViewKind.All, Query = '') refresh;
+  set $View/Feedline.ReaderView_Source = empty;
+  set $View/Feedline.ReaderView_Tag = empty;
+  set $View/Feedline.ReaderView_SourceTag = empty;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Re-run the list after the search box changes.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_ApplyQuery (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Toggle a tag on the active article — the rows in the tag sheet.
+ *
+ * @param $View The reader state
+ * @param $Tag The tag that was clicked
+ * @returns true
+ */
+create microflow Feedline.ACT_ToggleTag (
+  $View: Feedline.ReaderView,
+  $Tag: Feedline.Tag
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  if $Active = empty then
+    return true;
+  end if;
+  retrieve $Current from $Active/Feedline.Article_Tag;
+  $Next = create list of Feedline.Tag;
+  declare $Had boolean = false;
+  loop $T in $Current
+  begin
+    if $T = $Tag then
+      set $Had = true;
+    else
+      add $T to $Next;
+    end if;
+  end loop;
+  if not($Had) then
+    add $Tag to $Next;
+  end if;
+  change $Active (Feedline.Article_Tag = $Next);
+  commit $Active refresh;
+  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Create a tag from the sheet's text box and apply it to the active article.
+ *
+ * Reuses an existing tag when the name already exists, which is what makes the
+ * tag layer shared rather than per-article strings.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create microflow Feedline.ACT_CommitNewTag (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  declare $Name string = trim($View/TagDraft);
+  if $Name = '' then
+    return true;
+  end if;
+  retrieve $Existing from Feedline.Tag where [Name = $Name] limit 1;
+  if $Existing = empty then
+    retrieve $AllTags from Feedline.Tag;
+    $TagCount = count($AllTags);
+    $Existing = create Feedline.Tag (
+      Name = $Name,
+      Slug = 'custom',
+      SortOrder = $TagCount + 1);
+    commit $Existing;
+  end if;
+  change $View (TagDraft = '') refresh;
+  call microflow Feedline.ACT_ToggleTag(View = $View, Tag = $Existing);
+  return true;
+end;
+/
+
+/**
+ * Remove a tag from the active article — the × on a chip in the detail pane.
+ *
+ * @param $View The reader state
+ * @param $Tag The tag to remove
+ * @returns true
+ */
+create microflow Feedline.ACT_RemoveTag (
+  $View: Feedline.ReaderView,
+  $Tag: Feedline.Tag
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  retrieve $Active from $View/Feedline.ReaderView_ActiveArticle;
+  if $Active = empty then
+    return true;
+  end if;
+  retrieve $Current from $Active/Feedline.Article_Tag;
+  $Next = create list of Feedline.Tag;
+  loop $T in $Current
+  begin
+    if $T != $Tag then
+      add $T to $Next;
+    end if;
+  end loop;
+  change $Active (Feedline.Article_Tag = $Next);
+  commit $Active refresh;
+  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  return true;
+end;
+/
+
+/**
+ * Set the active article before opening the tag sheet from a list row.
+ *
+ * @param $View The reader state
+ * @param $Article The row whose "＋ tag" button was pressed
+ * @returns true
+ */
+create microflow Feedline.ACT_OpenTagSheetFor (
+  $View: Feedline.ReaderView,
+  $Article: Feedline.Article
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  set $View/Feedline.ReaderView_ActiveArticle = $Article;
+  call microflow Feedline.SUB_RefreshView(View = $View);
+  show page Feedline.TagSheet(View: $View);
+  return true;
+end;
+/

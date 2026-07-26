@@ -1,0 +1,478 @@
+-- ---------------------------------------------------------------------------
+-- Demo data — the ten feeds, five tags and twelve articles from the prototype.
+--
+-- Seeded from an after-startup microflow guarded on "are there sources yet",
+-- so a fresh database comes up looking like the design and a restart does not
+-- duplicate anything.
+-- ---------------------------------------------------------------------------
+
+/**
+ * Attach up to two source tags to a feed.
+ *
+ * Source_SourceTag is a reference set, so the whole list is assigned at once;
+ * retrieving both names in a single query keeps this to one round-trip.
+ *
+ * @param $Source The feed to tag
+ * @param $T1 First source-tag name
+ * @param $T2 Second source-tag name
+ * @returns true
+ */
+create microflow Feedline.SUB_LinkSourceTags (
+  $Source: Feedline.Source,
+  $T1: string,
+  $T2: string
+)
+returns boolean as $ok
+folder 'Seed'
+begin
+  retrieve $Tags from Feedline.SourceTag where [Name = $T1 or Name = $T2];
+  change $Source (Feedline.Source_SourceTag = $Tags);
+  commit $Source;
+  return true;
+end;
+/
+
+/**
+ * Attach up to two article tags to an article.
+ *
+ * @param $Article The article to tag
+ * @param $T1 First tag name (empty to skip)
+ * @param $T2 Second tag name (empty to skip)
+ * @returns true
+ */
+create microflow Feedline.SUB_LinkArticleTags (
+  $Article: Feedline.Article,
+  $T1: string,
+  $T2: string
+)
+returns boolean as $ok
+folder 'Seed'
+begin
+  retrieve $Tags from Feedline.Tag where [Name = $T1 or Name = $T2];
+  change $Article (Feedline.Article_Tag = $Tags);
+  commit $Article;
+  return true;
+end;
+/
+
+/**
+ * Create one article against the feed identified by its slug.
+ *
+ * Word count and the meta line follow the prototype's own formulas
+ * (words = 700 + minutes * 40) so the rendered numbers match the design.
+ *
+ * @param $SourceSlug Slug of the owning feed
+ * @param $Minutes Reading time in minutes
+ * @param $TimeLabel Relative age shown in the list row (e.g. '15h')
+ * @param $Title Headline
+ * @param $Excerpt Standfirst, shown in the row and as the detail lead
+ * @param $P1 Body paragraph 1
+ * @param $P2 Body paragraph 2
+ * @param $P3 Body paragraph 3
+ * @param $P4 Body paragraph 4 (may be empty)
+ * @param $IsRead Read state
+ * @param $IsStarred Starred state
+ * @param $IsSaved Read-later state
+ * @param $SortOrder Position in the default list
+ * @returns The new article
+ */
+create microflow Feedline.SUB_CreateArticle (
+  $SourceSlug: string,
+  $Minutes: integer,
+  $TimeLabel: string,
+  $Title: string,
+  $Excerpt: string,
+  $P1: string,
+  $P2: string,
+  $P3: string,
+  $P4: string,
+  $IsRead: boolean,
+  $IsStarred: boolean,
+  $IsSaved: boolean,
+  $SortOrder: integer
+)
+returns Feedline.Article as $Article
+folder 'Seed'
+begin
+  retrieve $Source from Feedline.Source where [Slug = $SourceSlug] limit 1;
+  declare $Words integer = 700 + $Minutes * 40;
+  $Article = create Feedline.Article (
+    Title = $Title,
+    Excerpt = $Excerpt,
+    BodyP1 = $P1,
+    BodyP2 = $P2,
+    BodyP3 = $P3,
+    BodyP4 = $P4,
+    Minutes = $Minutes,
+    Words = $Words,
+    TimeLabel = $TimeLabel,
+    MetaLine = toString($Minutes) + ' min read · ' + toString($Words) + ' words · today, 07:12',
+    IsRead = $IsRead,
+    IsStarred = $IsStarred,
+    IsSaved = $IsSaved,
+    PublishedAt = [%CurrentDateTime%],
+    SortOrder = $SortOrder);
+  set $Article/Feedline.Article_Source = $Source;
+  commit $Article;
+  return $Article;
+end;
+/
+
+/**
+ * Seed the demo dataset on first start.
+ *
+ * Guarded on the source count so it is a no-op on every later startup. Must
+ * return true — an after-startup microflow that returns false aborts the boot.
+ *
+ * @returns true
+ */
+create microflow Feedline.ACT_SeedDemoData ()
+returns boolean as $ok
+folder 'Seed'
+begin
+  retrieve $Existing from Feedline.Source;
+  $ExistingCount = count($Existing);
+  if $ExistingCount > 0 then
+    log info node 'Feedline' 'Demo data already present, skipping seed';
+    return true;
+  end if;
+
+  -- --- Source tags (sidebar chip row) -------------------------------------
+  $STech = create Feedline.SourceTag (Name = 'Tech', SortOrder = 1);
+  $SNews = create Feedline.SourceTag (Name = 'News', SortOrder = 2);
+  $SDeep = create Feedline.SourceTag (Name = 'Deep dives', SortOrder = 3);
+  $SDev = create Feedline.SourceTag (Name = 'Dev', SortOrder = 4);
+  $SComm = create Feedline.SourceTag (Name = 'Community', SortOrder = 5);
+  $SLow = create Feedline.SourceTag (Name = 'Low-code', SortOrder = 6);
+  $SPlat = create Feedline.SourceTag (Name = 'Platform', SortOrder = 7);
+  $SNewsl = create Feedline.SourceTag (Name = 'Newsletter', SortOrder = 8);
+  $SDutch = create Feedline.SourceTag (Name = 'Dutch', SortOrder = 9);
+  $SDesign = create Feedline.SourceTag (Name = 'Design', SortOrder = 10);
+  $SBiz = create Feedline.SourceTag (Name = 'Business', SortOrder = 11);
+  $SourceTagList = create list of Feedline.SourceTag;
+  add $STech to $SourceTagList;
+  add $SNews to $SourceTagList;
+  add $SDeep to $SourceTagList;
+  add $SDev to $SourceTagList;
+  add $SComm to $SourceTagList;
+  add $SLow to $SourceTagList;
+  add $SPlat to $SourceTagList;
+  add $SNewsl to $SourceTagList;
+  add $SDutch to $SourceTagList;
+  add $SDesign to $SourceTagList;
+  add $SBiz to $SourceTagList;
+  commit $SourceTagList;
+
+  -- --- Article tags -------------------------------------------------------
+  $TWork = create Feedline.Tag (Name = 'Read at work', Slug = 'readatwork', SortOrder = 1);
+  $TDesign = create Feedline.Tag (Name = 'Design ref', Slug = 'designref', SortOrder = 2);
+  $TLong = create Feedline.Tag (Name = 'Long read', Slug = 'longread', SortOrder = 3);
+  $TShare = create Feedline.Tag (Name = 'To share', Slug = 'toshare', SortOrder = 4);
+  $TFollow = create Feedline.Tag (Name = 'Follow up', Slug = 'followup', SortOrder = 5);
+  $TagList = create list of Feedline.Tag;
+  add $TWork to $TagList;
+  add $TDesign to $TagList;
+  add $TLong to $TagList;
+  add $TShare to $TagList;
+  add $TFollow to $TagList;
+  commit $TagList;
+
+  -- --- Feeds --------------------------------------------------------------
+  $Verge = create Feedline.Source (Name = 'The Verge', Host = 'theverge.com',
+    FeedUrl = 'https://theverge.com/rss/index.xml', Mono = 'V', Slug = 'verge',
+    TagLine = 'Tech · News', SortOrder = 1);
+  $Ars = create Feedline.Source (Name = 'Ars Technica', Host = 'arstechnica.com',
+    FeedUrl = 'https://feeds.arstechnica.com/arstechnica/index', Mono = 'A', Slug = 'ars',
+    TagLine = 'Tech · Deep dives', SortOrder = 2);
+  $Hn = create Feedline.Source (Name = 'Hacker News', Host = 'news.ycombinator.com',
+    FeedUrl = 'https://news.ycombinator.com/rss', Mono = 'H', Slug = 'hn',
+    TagLine = 'Dev · Community', SortOrder = 3);
+  $Mendix = create Feedline.Source (Name = 'Mendix Blog', Host = 'mendix.com/blog',
+    FeedUrl = 'https://www.mendix.com/blog/feed/', Mono = 'M', Slug = 'mendix',
+    TagLine = 'Low-code · Platform', SortOrder = 4);
+  $Lcw = create Feedline.Source (Name = 'Low-Code Weekly', Host = 'lowcodeweekly.dev',
+    FeedUrl = 'https://lowcodeweekly.dev/feed.xml', Mono = 'L', Slug = 'lcw',
+    TagLine = 'Low-code · Newsletter', SortOrder = 5);
+  $Nrc = create Feedline.Source (Name = 'NRC Tech', Host = 'nrc.nl/tech',
+    FeedUrl = 'https://www.nrc.nl/rss/tech', Mono = 'N', Slug = 'nrc',
+    TagLine = 'News · Dutch', SortOrder = 6);
+  $Smash = create Feedline.Source (Name = 'Smashing Magazine', Host = 'smashingmagazine.com',
+    FeedUrl = 'https://www.smashingmagazine.com/feed/', Mono = 'S', Slug = 'smash',
+    TagLine = 'Dev · Design', SortOrder = 7);
+  $Csst = create Feedline.Source (Name = 'CSS-Tricks', Host = 'css-tricks.com',
+    FeedUrl = 'https://css-tricks.com/feed/', Mono = 'C', Slug = 'csst',
+    TagLine = 'Dev · Design', SortOrder = 8);
+  $Strat = create Feedline.Source (Name = 'Stratechery', Host = 'stratechery.com',
+    FeedUrl = 'https://stratechery.com/feed/', Mono = 'St', Slug = 'strat',
+    TagLine = 'Business · Deep dives', SortOrder = 9);
+  $Tc = create Feedline.Source (Name = 'TechCrunch', Host = 'techcrunch.com',
+    FeedUrl = 'https://techcrunch.com/feed/', Mono = 'T', Slug = 'tc',
+    TagLine = 'Tech · Business', SortOrder = 10);
+  $SourceList = create list of Feedline.Source;
+  add $Verge to $SourceList;
+  add $Ars to $SourceList;
+  add $Hn to $SourceList;
+  add $Mendix to $SourceList;
+  add $Lcw to $SourceList;
+  add $Nrc to $SourceList;
+  add $Smash to $SourceList;
+  add $Csst to $SourceList;
+  add $Strat to $SourceList;
+  add $Tc to $SourceList;
+  commit $SourceList;
+
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Verge,
+    T1 = 'Tech',
+    T2 = 'News');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Ars,
+    T1 = 'Tech',
+    T2 = 'Deep dives');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Hn,
+    T1 = 'Dev',
+    T2 = 'Community');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Mendix,
+    T1 = 'Low-code',
+    T2 = 'Platform');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Lcw,
+    T1 = 'Low-code',
+    T2 = 'Newsletter');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Nrc,
+    T1 = 'News',
+    T2 = 'Dutch');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Smash,
+    T1 = 'Dev',
+    T2 = 'Design');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Csst,
+    T1 = 'Dev',
+    T2 = 'Design');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Strat,
+    T1 = 'Business',
+    T2 = 'Deep dives');
+  call microflow Feedline.SUB_LinkSourceTags(
+    Source = $Tc,
+    T1 = 'Tech',
+    T2 = 'Business');
+
+  -- --- Articles -----------------------------------------------------------
+  $A1 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'mendix',
+    Minutes = 12,
+    TimeLabel = '15h',
+    Title = 'Mendix 11 ships native offline sync for tablet apps',
+    Excerpt = 'The release note focuses on conflict resolution: the runtime now keeps a per-entity change log instead of a single snapshot, which makes long field sessions on iPad far less lossy.',
+    P1 = 'The headline feature in Mendix 11 is not a new widget or a studio redesign — it is a rewrite of how offline-first apps reconcile state when they come back online. Where earlier versions shipped a snapshot diff, the runtime now keeps a per-entity change log.',
+    P2 = 'For teams building tablet apps this matters most in long sessions. A field inspector working through forty checklists no longer risks losing the whole batch because one record went stale; only the conflicting attribute is surfaced for review.',
+    P3 = 'The migration path is intentionally boring. Existing offline profiles keep working, and the new behaviour is opt-in per entity through a checkbox in the sync configuration.',
+    P4 = '',
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 1);
+  call microflow Feedline.SUB_LinkArticleTags(
+    Article = $A1,
+    T1 = 'Read at work',
+    T2 = '');
+
+  $A2 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'strat',
+    Minutes = 9,
+    TimeLabel = '17h',
+    Title = 'The low-code squeeze',
+    Excerpt = 'Platform vendors are being pushed from two sides at once: AI codegen from below, enterprise suites from above. The middle is where the margin used to be.',
+    P1 = 'Every platform business eventually meets the same question: are you a tool or a substrate? Low-code vendors have been able to defer that answer for a decade because the alternative — hiring more developers — was simply more expensive.',
+    P2 = 'AI-assisted code generation changes the arithmetic, but not in the direction most commentary assumes. Generation was never the bottleneck. Governance, deployment, and the long tail of integration were, and those remain stubbornly human.',
+    P3 = 'The vendors that survive will be the ones that treat generated code as just another input to a governed pipeline, rather than a competing product.',
+    P4 = '',
+    IsRead = false,
+    IsStarred = true,
+    IsSaved = false,
+    SortOrder = 2);
+
+  $A3 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'verge',
+    Minutes = 4,
+    TimeLabel = '5h',
+    Title = 'iPadOS 27 finally lets apps own the whole window',
+    Excerpt = 'Multi-window resizing is no longer a Slide Over compromise. For reading apps this means real three-pane layouts on the 13-inch.',
+    P1 = 'Apple''s window management story on iPad has been a decade of near-misses. iPadOS 27 does the obvious thing: apps declare a minimum size and the system stops pretending everything is a phone in a trench coat.',
+    P2 = 'In practice the win is for information-dense apps. A mail client or feed reader can now hold a source list, an item list, and a detail pane without one of them collapsing below usefulness.',
+    P3 = 'The keyboard story improves alongside it, with system-level shortcut discovery that surfaces app shortcuts in a single sheet.',
+    P4 = '',
+    IsRead = true,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 3);
+  call microflow Feedline.SUB_LinkArticleTags(
+    Article = $A3,
+    T1 = 'Design ref',
+    T2 = '');
+
+  $A4 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'ars',
+    Minutes = 18,
+    TimeLabel = '11h',
+    Title = 'Inside the RSS revival nobody predicted',
+    Excerpt = 'Feed traffic is up for the third year running. The interesting part is not nostalgia — it is that algorithmic feeds made a deterministic timeline feel like a premium product.',
+    P1 = 'The first sign was in the logs. Publishers that had quietly kept their feeds alive started seeing meaningful, growing traffic from clients they had never heard of — not the big three readers, but self-hosted aggregators and small paid apps.',
+    P2 = 'What changed was not the technology. RSS is the same specification it was in 2005. What changed is that a chronological, complete, unranked list of everything a person chose to follow became scarce.',
+    P3 = 'There is a business consequence. If a reader controls the timeline, the publisher loses the ability to reorder it — and gains a reader who sees every item exactly once.',
+    P4 = 'Whether that trade favours publishers depends entirely on whether they were relying on the algorithm to redistribute their weakest work.',
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 4);
+  call microflow Feedline.SUB_LinkArticleTags(
+    Article = $A4,
+    T1 = 'Long read',
+    T2 = 'Read at work');
+
+  $A5 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'hn',
+    Minutes = 2,
+    TimeLabel = '14h',
+    Title = 'Show HN: A 40-line RSS parser with no dependencies',
+    Excerpt = 'Handles RSS 2.0, Atom, and the three malformed variants that make up most of the real web. Comments are mostly about the fourth.',
+    P1 = 'The parser is deliberately small: one regex pass to normalise entity encoding, then a streaming walk that only recognises the eight elements a reader actually renders.',
+    P2 = 'Most of the discussion turned to the failure cases — feeds that declare Atom but nest RSS items, and publishers that emit relative URLs in enclosure tags.',
+    P3 = 'The author''s position is that a reader should fail loudly per-item rather than reject a whole feed, which is the right call for anyone who has watched a single bad character silence a source for a week.',
+    P4 = '',
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = true,
+    SortOrder = 5);
+
+  $A6 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'lcw',
+    Minutes = 3,
+    TimeLabel = '21h',
+    Title = 'Issue 214: Governance is the new feature request',
+    Excerpt = 'Three platform releases this month all shipped audit tooling ahead of anything user-facing. A pattern, not a coincidence.',
+    P1 = 'This week''s releases share a theme. None of the headline items are things an end user will ever see: deployment approval chains, change attribution, environment drift reports.',
+    P2 = 'It reads as a maturing market. The buyer is no longer the department that wants an app by Friday; it is the platform team that inherited forty of them.',
+    P3 = 'Also in this issue: two new component libraries, a good write-up on modelling many-to-many tags without a helper entity, and a job board that is finally not all staffing agencies.',
+    P4 = '',
+    IsRead = true,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 6);
+
+  $A7 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'smash',
+    Minutes = 11,
+    TimeLabel = '8h',
+    Title = 'Designing for touch density',
+    Excerpt = 'Dense does not mean small. A practical look at raising information per screen while keeping every target at 44 points.',
+    P1 = 'The instinct when a client asks for density is to shrink type and tighten padding. That produces a design that reviews well on a laptop and fails in the hand.',
+    P2 = 'A better lever is hierarchy. Most dense interfaces are dense in the wrong dimension — they repeat low-value metadata on every row instead of committing screen space to the one or two fields a user actually scans.',
+    P3 = 'The 44-point rule is also more flexible than it appears: a target can overlap its neighbours'' visual bounds as long as the tap regions do not, which lets rows sit at 36 points of visible height with generous hit areas.',
+    P4 = '',
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 7);
+  call microflow Feedline.SUB_LinkArticleTags(
+    Article = $A7,
+    T1 = 'Design ref',
+    T2 = '');
+
+  $A8 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'nrc',
+    Minutes = 6,
+    TimeLabel = '19h',
+    Title = 'Nederlandse uitvoeringsorganisaties kiezen voor low-code',
+    Excerpt = 'Twee grote uitvoerders bouwen nieuwe interne applicaties standaard op een low-codeplatform. De Rekenkamer is kritisch over uittreedkosten.',
+    P1 = 'De keuze wordt verdedigd met doorlooptijd: interne applicaties die eerder een jaar kostten, staan nu binnen een kwartaal in productie. De IT-afdelingen spreken van een beheersbaarder landschap.',
+    P2 = 'De Rekenkamer plaatst een kanttekening bij de afhankelijkheid van één leverancier. Uittreedkosten zijn in de businesscase niet gequantificeerd.',
+    P3 = 'Beide organisaties zeggen dat kritische systemen buiten het platform blijven.',
+    P4 = '',
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 8);
+  call microflow Feedline.SUB_LinkArticleTags(
+    Article = $A8,
+    T1 = 'Read at work',
+    T2 = '');
+
+  $A9 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'tc',
+    Minutes = 5,
+    TimeLabel = '12h',
+    Title = 'Feed aggregator Fraytt raises $14M to sell reading time back to enterprises',
+    Excerpt = 'The pitch is internal knowledge routing: point it at industry feeds, let teams tag, and surface what a colleague already read.',
+    P1 = 'The product is a reader with a shared tag layer. Individual reading stays private; tags are team-visible, which turns a feed list into a lightweight research index.',
+    P2 = 'Investors are betting the wedge is the tag, not the feed. Every organisation already has a channel where people paste links; almost none of them can answer what was posted about a topic six months ago.',
+    P3 = 'Pricing is per-seat with an unusual twist: sources are unlimited, but shared tag namespaces are capped by tier.',
+    P4 = '',
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 9);
+
+  $A10 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'csst',
+    Minutes = 7,
+    TimeLabel = '3h',
+    Title = 'Subgrid is quietly the best thing for dense list layouts',
+    Excerpt = 'Row alignment across independently sized cards, without magic numbers or JavaScript measurement.',
+    P1 = 'The classic problem with a list of cards is that each one lays out its own internal grid, so titles, metadata, and actions never line up between neighbours.',
+    P2 = 'Subgrid lets the child opt into the parent''s tracks. Suddenly a list row can align its thumbnail, title block, and trailing controls to the same columns as every other row without shared fixed widths.',
+    P3 = 'Support is now broad enough to use without a fallback in an internal app, which is exactly the context where dense layouts matter most.',
+    P4 = '',
+    IsRead = true,
+    IsStarred = true,
+    IsSaved = false,
+    SortOrder = 10);
+  call microflow Feedline.SUB_LinkArticleTags(
+    Article = $A10,
+    T1 = 'Design ref',
+    T2 = '');
+
+  $A11 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'verge',
+    Minutes = 3,
+    TimeLabel = '21h',
+    Title = 'Apple adds system-wide keyboard shortcut discovery',
+    Excerpt = 'Hold Command in any app and the system renders the app''s own shortcut map, pulled from a declared manifest.',
+    P1 = 'The feature is small and long overdue: apps declare their shortcuts once, and the system renders a consistent sheet on Command-hold.',
+    P2 = 'For iPad apps used with a keyboard case this closes the discoverability gap that made shortcuts effectively invisible to most users.',
+    P3 = 'Developers get a lint warning when two shortcuts collide, which will quietly improve a lot of existing apps.',
+    P4 = '',
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 11);
+
+  $A12 = call microflow Feedline.SUB_CreateArticle(
+    SourceSlug = 'ars',
+    Minutes = 14,
+    TimeLabel = '6h',
+    Title = 'The tag is the interface',
+    Excerpt = 'Folders lost, tags won, and most software still models them as an afterthought. What a first-class tag layer changes.',
+    P1 = 'Hierarchies fail for the same reason every time: an item belongs in two places and the person filing it has to choose. Tags remove the choice, which is why every serious information tool eventually grows them.',
+    P2 = 'Where tools differ is whether tags are a property of an item or an object in their own right. The second option is more work and considerably more useful — it lets a tag carry a description, an owner, and a colour, and lets it be renamed without touching every item.',
+    P3 = 'The practical test is renaming. If renaming a tag is an administrative action rather than a bulk edit, the model is right.',
+    P4 = 'The second test is whether two different kinds of object can share a tag namespace — an article and the source it came from, for example.',
+    IsRead = false,
+    IsStarred = false,
+    IsSaved = false,
+    SortOrder = 12);
+  call microflow Feedline.SUB_LinkArticleTags(
+    Article = $A12,
+    T1 = 'Long read',
+    T2 = '');
+
+  $CountsOk = call microflow Feedline.ACT_RecalculateCounts();
+  log info node 'Feedline' 'Seeded 10 feeds, 5 tags and 12 articles';
+  return true;
+end;
+/

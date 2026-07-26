@@ -118,10 +118,10 @@ Nothing installed by the script is committed: the mxcli clone
 (`/opt/mxcli-src`), the built binary (`/usr/local/bin/mxcli`), the ANTLR jar and
 the `~/.mxcli` caches all live outside the repository.
 
-## Scaffolding the Mendix project
+## The Mendix project
 
-Not done yet — this is the next step, in a follow-up session. The single command
-that bootstraps the app:
+Scaffolded and built — see [README.md](README.md) for the app itself. It was
+bootstrapped with:
 
 ```bash
 mxcli new RssReader --version 11.12.1
