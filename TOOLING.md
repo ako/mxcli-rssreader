@@ -22,7 +22,7 @@ Verified on 2026-07-26.
 
 | Tool | Version | Location | Provenance |
 | --- | --- | --- | --- |
-| **mxcli** | `57442ec` | `/usr/local/bin/mxcli` | built from source |
+| **mxcli** | `8db91bc` | `/usr/local/bin/mxcli` | built from source |
 | **MxBuild + `mx` validator** | 11.12.1 | `~/.mxcli/mxbuild/11.12.1/modeler/` | `mxcli setup mxbuild` |
 | **Mendix runtime** | 11.12.1 | `~/.mxcli/runtime/11.12.1/` | `mxcli setup mxruntime` |
 | **ANTLR** | 4.13.1 (pinned) | `/opt/antlr/antlr-4.13.1-complete.jar` | antlr.org download |
@@ -37,17 +37,25 @@ Verified on 2026-07-26.
 ```
 repo:   https://github.com/ako/mxcli.git
 branch: main
-commit: 57442ec18741322dcc69e6eb293a0ca69d302b52
-short:  57442ec
-subject: Merge pull request #33 from ako/fix/check-expression-validators
+commit: 8db91bc99a891133b844bc2d8e71d7117e5d7edb
+short:  8db91bc
+subject: Merge pull request #36 from ako/feature/typed-design-properties
+date:   2026-07-25
 ```
 
 `scripts/setup-tools.sh` builds `main` HEAD by default, so a future session may
 pick up a newer commit. To reproduce exactly this build:
 
 ```bash
-MXCLI_REF=57442ec18741322dcc69e6eb293a0ca69d302b52 bash scripts/setup-tools.sh
+MXCLI_REF=8db91bc99a891133b844bc2d8e71d7117e5d7edb bash scripts/setup-tools.sh
 ```
+
+### Update history
+
+| Date | Commit | Brought in |
+| --- | --- | --- |
+| 2026-07-26 | `57442ec` | initial pin |
+| 2026-07-26 | `8db91bc` | `INDEX name ON (cols)` in entity definitions (grammar change), typed design properties with `check` validation, XPath-arithmetic diagnostics, Atlas-first `migrate-design-prototype` skill |
 
 ## Notes on the pins
 
@@ -139,7 +147,7 @@ Cold-start run of `scripts/setup-tools.sh` (ANTLR install, mxcli clone and binar
 all removed first) completed with every check green:
 
 ```
-OK  mxcli --help (mxcli version 57442ec)
+OK  mxcli --help (mxcli version 8db91bc)
 OK  antlr4 4.13.1
 OK  mx validator /root/.mxcli/mxbuild/11.12.1/modeler/mx
 OK  Mendix runtime /root/.mxcli/runtime/11.12.1
@@ -151,3 +159,10 @@ Additionally confirmed: the freshly regenerated parser round-trips MDL (`mxcli
 check` on a `SHOW ENTITIES;` script passes), the `mx` validator responds to
 `mx help`, and `service postgresql start` + `sudo -u postgres psql` — the exact
 path `--ensure-db` takes — bring up the 16/main cluster.
+
+The `57442ec` → `8db91bc` update exercised the upgrade path end to end: the
+`SessionStart` hook fetched `main`, saw the installed short SHA no longer
+matched, and rebuilt. That update changed `mdl/grammar/domains/MDLDomainModel.g4`,
+so the pinned-ANTLR regeneration was load-bearing — `mxcli check` on the new
+`mdl-examples/bug-tests/f4-entity-index-on.mdl` and
+`typed-design-properties.mdl` both pass with the regenerated parser.
