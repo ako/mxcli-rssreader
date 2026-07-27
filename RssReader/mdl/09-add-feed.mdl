@@ -1,0 +1,238 @@
+-- ---------------------------------------------------------------------------
+-- The add-feed wizard, wired to the real fetcher.
+--
+-- Both steps used to be theatre: ACT_ValidateFeed reported a hardcoded
+-- "Valid feed · Atom 1.0 · 24 items · updated 2h ago" for any input, and
+-- ACT_CommitFeed created a Source named after the raw URL with a '?' badge.
+-- That was honest while there was no fetcher (the design prototype faked it
+-- too), but 08-fetch-feeds.mdl added one — so the wizard now actually fetches
+-- the URL, reports what came back, names the feed from its own <title>, and
+-- pulls the first batch of articles on confirm.
+--
+-- Depends on: SUB_FetchFeed, SUB_InnerText, SUB_StripHtml, SUB_HostFromUrl.
+-- ---------------------------------------------------------------------------
+
+/**
+ * Step 1 of the wizard: fetch the URL and report what it actually is.
+ *
+ * On success the sheet advances to step 2 with the feed's own title, its
+ * dialect and its item count. On failure it stays on step 1 and shows why —
+ * an unreachable host, an HTTP error and "that is a web page, not a feed" are
+ * different problems and the user can only fix them if they are told apart.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_ValidateFeed (
+  $View: Feedline.ReaderView
+)
+returns Boolean as $ok
+folder 'Logic/Views'
+begin
+  declare $Url string = trim($View/NewFeedUrl);
+  if length($Url) < 5 then
+    change $View (DetectedError = 'Enter a feed URL', NewFeedStep = 0) refresh;
+    return true;
+  end if;
+
+  -- Same call shape as SUB_FetchFeed: `returns response` so a 404 reads as a
+  -- 404, plus one retry because feed endpoints drop connections often enough
+  -- to matter. Each REST call declares its own output variable (CE0111).
+  $Resp = rest call get '{1}' with (
+      {1} = $Url
+    )
+    header Accept = 'application/rss+xml, application/atom+xml, application/xml, text/xml'
+    header 'User-Agent' = 'Feedline/1.0 (+mxcli)'
+    timeout 30
+    returns response
+    on error continue;
+
+  declare $Code integer = 0;
+  declare $Body string = '';
+  if $Resp != empty then
+    set $Code = $Resp/StatusCode;
+    set $Body = $Resp/Content;
+  else
+    $Retry = rest call get '{1}' with (
+        {1} = $Url
+      )
+      header Accept = 'application/rss+xml, application/atom+xml, application/xml, text/xml'
+      header 'User-Agent' = 'Feedline/1.0 (+mxcli)'
+      timeout 30
+      returns response
+      on error continue;
+    if $Retry != empty then
+      set $Code = $Retry/StatusCode;
+      set $Body = $Retry/Content;
+    end if;
+  end if;
+
+  if $Code = 0 then
+    change $View (DetectedError = 'Could not reach that URL', NewFeedStep = 0) refresh;
+    return true;
+  end if;
+  if $Code < 200 or $Code > 299 then
+    change $View (DetectedError = 'The server answered HTTP ' + toString($Code), NewFeedStep = 0) refresh;
+    return true;
+  end if;
+  if $Body = empty or length($Body) < 40 then
+    change $View (DetectedError = 'That URL returned an empty body', NewFeedStep = 0) refresh;
+    return true;
+  end if;
+
+  -- RSS uses <item>, Atom uses <entry>. A 301 to a marketing page lands here
+  -- with a perfectly good 200 and no items at all, which is exactly the case
+  -- the old fake validation waved through.
+  declare $ItemTag string = 'item';
+  declare $Kind string = 'RSS';
+  if find($Body, '<item') < 0 then
+    set $ItemTag = 'entry';
+    set $Kind = 'Atom';
+  end if;
+  declare $FirstItem integer = find($Body, '<' + $ItemTag);
+  if $FirstItem < 0 then
+    change $View (DetectedError = 'That is not an RSS or Atom feed', NewFeedStep = 0) refresh;
+    return true;
+  end if;
+
+  -- Count the items, capped — a feed with 400 entries does not need an exact
+  -- number to prove it is a feed.
+  declare $Count integer = 0;
+  declare $Cursor integer = 0;
+  while $Count < 50
+  begin
+    declare $At integer = find($Body, '<' + $ItemTag, $Cursor);
+    if $At < 0 then
+      set $Count = $Count + 1000;
+    else
+      set $Count = $Count + 1;
+      set $Cursor = $At + 1;
+    end if;
+  end while;
+  declare $Items integer = $Count;
+  if $Items > 999 then
+    set $Items = $Items - 1000;
+  end if;
+
+  -- The channel's own <title> is the first one, before any item block.
+  declare $Head string = substring($Body, 0, $FirstItem);
+  $RawName = call microflow Feedline.SUB_InnerText(Xml = $Head, Tag = 'title');
+  $Name = call microflow Feedline.SUB_StripHtml(S = $RawName);
+  declare $FeedName string = $Name;
+  if trim($FeedName) = '' then
+    set $FeedName = 'Untitled feed';
+  end if;
+  if length($FeedName) > 60 then
+    set $FeedName = substring($FeedName, 0, 60);
+  end if;
+
+  $Host = call microflow Feedline.SUB_HostFromUrl(Url = $Url);
+
+  declare $Summary string = $FeedName + ' · ' + $Kind + ' · ' + toString($Items) + ' items';
+  if $Items >= 50 then
+    set $Summary = $FeedName + ' · ' + $Kind + ' · 50+ items';
+  end if;
+
+  change $View (
+    DetectedTitle = $Summary,
+    DetectedFeedName = $FeedName,
+    DetectedHost = $Host,
+    DetectedError = '',
+    NewFeedStep = 1) refresh;
+  return true;
+end;
+
+grant execute on microflow Feedline.ACT_ValidateFeed to Feedline.User;
+/
+
+/**
+ * Step 2 of the wizard: subscribe, then fetch the first batch straight away.
+ *
+ * Fetching on confirm rather than waiting for the next Refresh is the point —
+ * a feed that appears in the sidebar with no articles looks broken even when
+ * it is only unfetched.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_CommitFeed (
+  $View: Feedline.ReaderView
+)
+returns Boolean as $ok
+folder 'Logic/Views'
+begin
+  declare $Url string = trim($View/NewFeedUrl);
+  if $Url = '' then
+    return true;
+  end if;
+
+  -- Re-adding a feed already in the sidebar should be a no-op, not a duplicate
+  -- row that then double-counts every article.
+  retrieve $Existing from Feedline.Source where FeedUrl = $Url limit 1;
+  if $Existing != empty then
+    change $View (
+      NewFeedUrl = '',
+      NewFeedStep = 0,
+      DetectedError = '',
+      Toast = 'Already subscribed to ' + $Existing/Name) refresh;
+    close page;
+    return true;
+  end if;
+
+  declare $FeedName string = trim($View/DetectedFeedName);
+  if $FeedName = '' then
+    set $FeedName = $Url;
+  end if;
+  declare $Host string = trim($View/DetectedHost);
+  if $Host = '' then
+    set $Host = $Url;
+  end if;
+
+  retrieve $AllSources from Feedline.Source;
+  $Order = count($AllSources);
+
+  $Source = create Feedline.Source (
+    Name = $FeedName,
+    Host = $Host,
+    FeedUrl = $Url,
+    Mono = toUpperCase(substring($FeedName, 0, 1)),
+    Slug = 'custom',
+    RefreshInterval = 'Manual only',
+    TagLine = 'Newly added',
+    LastFetchStatus = 'never fetched',
+    SortOrder = $Order + 1);
+  commit $Source on error rollback;
+
+  -- Pull the first batch now. SUB_FetchFeed never throws — it records the
+  -- outcome on the Source — so a feed that goes down between validate and
+  -- confirm still leaves a usable subscription behind.
+  $New = call microflow Feedline.SUB_FetchFeed(Source = $Source) on error continue;
+  declare $Added integer = 0;
+  if $New != empty then
+    set $Added = $New;
+  end if;
+
+  $rc = call microflow Feedline.ACT_RecalculateCounts() on error rollback;
+
+  change $View (
+    NewFeedUrl = '',
+    NewFeedStep = 0,
+    DetectedTitle = '',
+    DetectedFeedName = '',
+    DetectedHost = '',
+    DetectedError = '',
+    Toast = $FeedName + ' added · ' + toString($Added) + ' articles') refresh;
+  $r = call microflow Feedline.SUB_RefreshView(View = $View) on error rollback;
+  close page;
+  return $r;
+end;
+
+grant execute on microflow Feedline.ACT_CommitFeed to Feedline.User;
+/
+
+-- The error line the wizard needs to report a failure lives in 05-pages.mdl
+-- with the rest of the sheet, not in an `alter page` here: 05 recreates the
+-- page wholesale, so an insert from this script would be dropped on its next
+-- run (and applied twice if this one ran twice). The Manage sheet's Last fetch
+-- column moved into 05 for the same reason — it used to be an `alter page` in
+-- a later script, which meant re-running 05 alone silently reverted it.

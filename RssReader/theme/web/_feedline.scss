@@ -1,0 +1,1468 @@
+// ===========================================================================
+// Feedline — the "RSS Reader" design prototype rebuilt as a Mendix theme.
+//
+// Layer 4 of the Atlas-first ladder: this app's whole identity is a bespoke
+// three-pane reading chrome at fixed pixel widths, which no Atlas building
+// block or utility class expresses. Everything here is prefixed `fl-`.
+//
+// Imported from main.scss AFTER the Atlas imports so it wins the cascade.
+// ===========================================================================
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+:root {
+  // --- Surfaces, darkest to lightest -------------------------------------
+  --fl-void: #08090b;
+  --fl-app: #0c0e11;
+  --fl-chrome: #111419;
+  --fl-sidebar: #0e1116;
+  --fl-detail: #0f1215;
+  --fl-sunken: #0a0c0f;
+  --fl-raised: #1b2029;
+  --fl-raised-hover: #232a34;
+  --fl-row-active: #1a212b;
+  --fl-nav-active: #1d242e;
+  --fl-hover: #191e26;
+  --fl-panel: #131820;
+  --fl-sheet: #12161c;
+
+  // --- Borders ------------------------------------------------------------
+  --fl-border: #1e232b;
+  --fl-border-soft: #1a1f26;
+  --fl-border-faint: #171b21;
+  --fl-border-row: #14181e;
+  --fl-border-strong: #262c35;
+  --fl-border-raised: #2a313c;
+  --fl-border-hover: #3a4351;
+  --fl-border-dashed: #313846;
+
+  // --- Ink ----------------------------------------------------------------
+  --fl-ink-bright: #f2f5fa;
+  --fl-ink: #e7eaf0;
+  --fl-ink-2: #c3cad5;
+  --fl-ink-3: #9aa3b0;
+  --fl-ink-4: #8a929e;
+  --fl-ink-5: #7e8794;
+  --fl-muted: #6b7381;
+  --fl-muted-2: #565e6b;
+  --fl-muted-3: #4a525e;
+
+  // --- Accents ------------------------------------------------------------
+  --fl-accent: #c8613a;
+  --fl-accent-hover: #d97245;
+  --fl-on-accent: #120c08;
+  --fl-unread-bar: #2e5fbf;
+  --fl-star: #e8a33d;
+  --fl-save: #4fc2d6;
+  --fl-ok: #5fd69a;
+  --fl-link: #6e9bff;
+
+  --fl-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --fl-serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --fl-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  // --- Map onto Atlas so anything we do not restyle still reads dark ------
+  --brand-primary: var(--fl-accent);
+  --bg-color: var(--fl-app);
+  --font-family-base: var(--fl-sans);
+  --font-color-default: var(--fl-ink);
+  --font-color-header: var(--fl-ink-bright);
+  --link-color: var(--fl-link);
+}
+
+// ---------------------------------------------------------------------------
+// Shell — the app owns the whole viewport.
+//
+// The prototype's topbar and sidebar are data-driven (feeds, unread counts,
+// source-tag chips), so they are page widgets rather than Atlas navigation.
+// That means the Atlas chrome has to get out of the way entirely.
+// ---------------------------------------------------------------------------
+html,
+body,
+#content,
+.mx-page {
+  background: var(--fl-void);
+  color: var(--fl-ink);
+  font-family: var(--fl-sans);
+  font-size: 13px;
+}
+
+.fl-app {
+  .region-topbar,
+  .mx-scrollcontainer-top,
+  .region-sidebar,
+  .mx-scrollcontainer-left,
+  .mx-navigationtree,
+  .toggle-btn {
+    display: none !important;
+  }
+
+  // Only the outer regions are flattened. A blanket `.mx-dataview` reset would
+  // also hit the DataView that Mendix wraps around every ListView row.
+  .region-content,
+  .mx-scrollcontainer-center,
+  .mx-scrollcontainer-wrapper,
+  .mx-placeholder {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+// The page's root DataView is the fixed app frame; its content wrapper is the
+// flex column the three panes live in.
+.fl-root {
+  position: fixed;
+  inset: 0;
+  background: var(--fl-app);
+  color: var(--fl-ink);
+  font-family: var(--fl-sans);
+  font-size: 13px;
+  overflow: hidden;
+
+  > .mx-dataview-content {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ListView reset — applies to the app frame and to every popup sheet, which
+// Mendix renders in its own .modal-dialog outside .fl-root.
+//
+// A Mendix row is `ul > li > .mx-dataview > .mx-dataview-content > template`,
+// and Atlas gives each level padding, borders and a background. Neutralise the
+// whole stack once so every row reads as the design's own markup.
+// ---------------------------------------------------------------------------
+.fl-root,
+.fl-sheet {
+  .mx-listview {
+    background: transparent;
+
+    > ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    > ul > li {
+      margin: 0;
+      padding: 0;
+      border: none;
+      background: transparent;
+      list-style: none;
+    }
+    > ul > li > .mx-dataview,
+    > ul > li > .mx-dataview > .mx-dataview-content {
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      background: transparent !important;
+      height: auto;
+    }
+    // Atlas's empty state is an <li class="mx-listview-empty"> carrying a bare
+    // <label>. Hidden by default — only the article list wants one, and it
+    // styles its own below.
+    > ul > li.mx-listview-empty {
+      display: none;
+    }
+  }
+
+  // Bootstrap form columns inside our compact inputs.
+  .control-label {
+    display: none !important;
+  }
+  .mx-textbox > div[class^="col-"],
+  .mx-textbox > div[class*=" col-"] {
+    width: 100%;
+    padding: 0;
+    float: none;
+  }
+}
+
+// --- Scrollbars ------------------------------------------------------------
+.fl-root ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.fl-root ::-webkit-scrollbar-thumb {
+  background: #2a3038;
+  border-radius: 4px;
+}
+.fl-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+// ---------------------------------------------------------------------------
+// Status strip + topbar
+// ---------------------------------------------------------------------------
+.fl-statusbar {
+  height: 28px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  background: var(--fl-void);
+  color: var(--fl-muted);
+  font-size: 11px;
+  font-family: var(--fl-mono);
+  border-bottom: 1px solid var(--fl-border-faint);
+}
+.fl-statusbar-right {
+  display: flex;
+  gap: 14px;
+}
+
+.fl-topbar {
+  height: 54px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  background: var(--fl-chrome);
+  border-bottom: 1px solid var(--fl-border);
+}
+
+.fl-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 218px;
+  flex: none;
+}
+.fl-brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--fl-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fl-on-accent);
+}
+.fl-brand-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fl-ink);
+}
+.fl-brand-badge {
+  font-size: 10px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted);
+  border: 1px solid var(--fl-border-strong);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+// Search — a Mendix textbox stripped back to the prototype's inline field.
+.fl-search {
+  flex: 1;
+  max-width: 400px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 11px;
+  background: var(--fl-sunken);
+  border: 1px solid var(--fl-border);
+  border-radius: 8px;
+
+  &::before {
+    content: "⌕";
+    color: var(--fl-muted);
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .mx-textbox,
+  .form-group {
+    flex: 1;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    min-height: 0;
+  }
+  .control-label {
+    display: none !important;
+  }
+  input.form-control {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+    color: var(--fl-ink) !important;
+    font-family: var(--fl-sans);
+    font-size: 13px;
+    height: 32px;
+    padding: 0;
+  }
+}
+.fl-search-key {
+  font-size: 10px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted-2);
+  border: 1px solid var(--fl-border-strong);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.fl-topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fl-refresh-meta {
+  text-align: right;
+  line-height: 1.3;
+}
+.fl-refresh-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
+  display: block;
+}
+.fl-refresh-value {
+  font-size: 11px;
+  font-family: var(--fl-mono);
+  color: var(--fl-ink-4);
+  display: block;
+}
+
+// ---------------------------------------------------------------------------
+// Buttons — Atlas's .btn is reset to the prototype's flat chrome.
+// ---------------------------------------------------------------------------
+.fl-btn,
+.fl-root .btn.fl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 13px;
+  background: var(--fl-raised);
+  border: 1px solid var(--fl-border-raised);
+  border-radius: 8px;
+  color: var(--fl-ink);
+  font-family: var(--fl-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: none;
+
+  &:hover,
+  &:focus {
+    background: var(--fl-raised-hover);
+    border-color: var(--fl-border-hover);
+    color: var(--fl-ink);
+  }
+}
+
+.fl-btn--icon {
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+  color: var(--fl-ink-3);
+  font-family: var(--fl-mono);
+  font-size: 13px;
+}
+
+.fl-btn--accent,
+.fl-root .btn.fl-btn--accent {
+  background: var(--fl-accent);
+  border: none;
+  color: var(--fl-on-accent);
+  font-weight: 600;
+
+  &:hover,
+  &:focus {
+    background: var(--fl-accent-hover);
+    color: var(--fl-on-accent);
+  }
+}
+
+.fl-btn--sm,
+.fl-root .btn.fl-btn--sm {
+  height: 26px;
+  padding: 0 10px;
+  background: #171c24;
+  border: 1px solid var(--fl-border-strong);
+  border-radius: 6px;
+  color: var(--fl-ink-3);
+  font-size: 11px;
+  font-weight: 400;
+
+  &:hover {
+    color: var(--fl-ink);
+  }
+}
+
+.fl-btn--ghost,
+.fl-root .btn.fl-btn--ghost {
+  height: 30px;
+  padding: 0 11px;
+  background: transparent;
+  border: 1px solid var(--fl-border-strong);
+  border-radius: 7px;
+  color: var(--fl-ink-3);
+  font-size: 11.5px;
+  font-weight: 400;
+
+  &:hover {
+    border-color: var(--fl-border-hover);
+    background: transparent;
+  }
+}
+.fl-btn--star.is-on { color: var(--fl-star); }
+.fl-btn--save.is-on { color: var(--fl-save); }
+
+// ---------------------------------------------------------------------------
+// Body: sidebar | list | detail
+// ---------------------------------------------------------------------------
+.fl-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.fl-sidebar {
+  width: 232px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--fl-sidebar);
+  border-right: 1px solid var(--fl-border);
+  min-height: 0;
+}
+
+.fl-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
+}
+
+.fl-tagbar {
+  padding: 12px 12px 11px;
+  border-bottom: 1px solid var(--fl-border-soft);
+}
+.fl-tagbar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+
+  .mx-listview,
+  .mx-listview > ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .mx-listview > ul > li { width: auto; }
+}
+
+.fl-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-family: var(--fl-sans);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--fl-border-strong);
+  background: #141922;
+  color: var(--fl-ink-3);
+  white-space: nowrap;
+
+  &:hover { border-color: var(--fl-border-hover); }
+  &.is-on {
+    background: var(--fl-accent);
+    border-color: var(--fl-accent);
+    color: var(--fl-on-accent);
+  }
+}
+
+// --- Smart views + feed rows ----------------------------------------------
+.fl-smartviews {
+  padding: 9px 8px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fl-navrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover { background: var(--fl-hover); }
+  &.is-on { background: var(--fl-nav-active); }
+}
+.fl-navrow-icon {
+  width: 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fl-muted);
+  flex: none;
+}
+.fl-navrow-icon--star { color: var(--fl-star); }
+.fl-navrow.is-on .fl-navrow-icon:not(.fl-navrow-icon--star) { color: var(--fl-accent); }
+.fl-navrow-label {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fl-ink-2);
+}
+.fl-navrow.is-on .fl-navrow-label { color: var(--fl-ink-bright); }
+.fl-navrow-count {
+  font-size: 11px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted);
+}
+
+.fl-feeds-header {
+  padding: 11px 17px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.fl-feeds-count {
+  font-size: 10px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted-2);
+}
+
+.fl-feeds {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 10px;
+  min-height: 0;
+
+  .mx-listview > ul > li { margin-bottom: 1px; }
+}
+
+.fl-feedrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover { background: var(--fl-hover); }
+  &.is-on { background: var(--fl-nav-active); }
+}
+.fl-feedrow-body {
+  flex: 1;
+  min-width: 0;
+}
+.fl-feedrow-name {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fl-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-feedrow-tagline {
+  display: block;
+  font-size: 10px;
+  color: var(--fl-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-feedrow-unread {
+  font-size: 11px;
+  font-family: var(--fl-mono);
+  color: var(--fl-accent);
+  flex: none;
+}
+
+.fl-manage {
+  flex: none;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 17px;
+  border-top: 1px solid var(--fl-border-soft);
+  color: var(--fl-ink-4);
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover { color: var(--fl-ink); }
+}
+
+// --- Source badge ----------------------------------------------------------
+// One class per feed slug: a widget has no computed inline style, so the tint
+// has to arrive as a class chosen by a DynamicClasses expression.
+.fl-badge {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fl-sunken);
+  background: var(--fl-muted);
+}
+.fl-badge--sm {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  font-size: 8px;
+}
+.fl-badge--lg {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+
+$fl-tints: (
+  verge: #e8a33d,
+  ars: #ff6a4d,
+  hn: #ff9a3d,
+  mendix: #4fc2d6,
+  lcw: #7fd16c,
+  nrc: #c8c8c8,
+  smash: #e8604d,
+  csst: #8e8ce8,
+  strat: #6e9bff,
+  tc: #5fd69a,
+  // Feeds added through the wizard: no per-source colour was designed for
+  // them, so they share a neutral tint rather than falling through unstyled.
+  custom: #8fa3b8
+);
+
+@each $slug, $color in $fl-tints {
+  .fl-tint-#{$slug} { background: $color; }
+  .fl-thumb.fl-tint-#{$slug} {
+    background: linear-gradient(135deg, rgba($color, 0.18), #151a21);
+    color: $color;
+  }
+}
+
+.fl-thumb {
+  width: 68px;
+  height: 48px;
+  border-radius: 5px;
+  border: 1px solid #1d232b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  opacity: 0.7;
+  background: #151a21;
+}
+
+// ---------------------------------------------------------------------------
+// Middle pane — the article list
+// ---------------------------------------------------------------------------
+.fl-list-pane {
+  width: 432px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--fl-app);
+  border-right: 1px solid var(--fl-border);
+  min-height: 0;
+}
+
+.fl-list-head {
+  flex: none;
+  padding: 11px 14px 10px;
+  border-bottom: 1px solid var(--fl-border-soft);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.fl-list-head-text {
+  flex: 1;
+  min-width: 0;
+}
+.fl-list-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fl-ink-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-list-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--fl-ink-4);
+  margin-top: 2px;
+}
+
+.fl-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+
+
+}
+
+// Article row. The left rule is the read/active indicator from the prototype:
+// orange when active, blue when unread, invisible once read.
+.fl-row {
+  display: flex;
+  gap: 10px;
+  padding: 11px 14px 10px 11px;
+  border-bottom: 1px solid var(--fl-border-row);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+
+  &:hover { background: #141920; }
+  &.is-unread { border-left-color: var(--fl-unread-bar); }
+  &.is-active {
+    background: var(--fl-row-active);
+    border-left-color: var(--fl-accent);
+  }
+}
+.fl-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.fl-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.fl-row-src {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fl-ink-3);
+  white-space: nowrap;
+}
+.fl-row-dot {
+  font-size: 11px;
+  color: var(--fl-muted-3);
+}
+.fl-row-time {
+  font-size: 11px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted);
+}
+.fl-row-words {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted-2);
+}
+.fl-row-title {
+  display: block;
+  font-size: 13.5px;
+  line-height: 1.32;
+  letter-spacing: -0.005em;
+  color: var(--fl-ink-bright);
+  font-weight: 600;
+  text-wrap: pretty;
+}
+.fl-row.is-read .fl-row-title {
+  color: var(--fl-ink-3);
+  font-weight: 400;
+}
+.fl-row-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.42;
+  color: var(--fl-ink-5);
+  margin-top: 3px;
+}
+.fl-row-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+
+  .mx-listview,
+  .mx-listview > ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .mx-listview > ul > li { width: auto; }
+}
+.fl-row-side {
+  width: 68px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.fl-row-actions {
+  display: flex;
+  gap: 2px;
+}
+.fl-iconbtn,
+.fl-root .btn.fl-iconbtn {
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fl-muted-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover { background: transparent; color: var(--fl-ink-3); }
+  &.is-on { color: var(--fl-star); }
+  &.fl-iconbtn--save.is-on { color: var(--fl-save); }
+}
+
+// --- Tag pills -------------------------------------------------------------
+// Base + one modifier per tag slug, same computed-style workaround as the
+// source badges.
+.fl-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  background: rgba(154, 163, 176, 0.12);
+  color: var(--fl-ink-3);
+}
+.fl-tag--lg {
+  padding: 4px 8px 4px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+$fl-tag-colors: (
+  readatwork: #4fc2d6,
+  designref: #8e8ce8,
+  longread: #e8a33d,
+  toshare: #7fd16c,
+  followup: #ff8a6a,
+  custom: #9aa3b0
+);
+
+@each $slug, $color in $fl-tag-colors {
+  .fl-tagc-#{$slug} {
+    background: rgba($color, 0.12);
+    color: $color;
+  }
+}
+
+.fl-tag-add,
+.fl-root .btn.fl-tag-add {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  background: transparent;
+  border: 1px dashed var(--fl-border-dashed);
+  border-radius: 4px;
+  color: var(--fl-muted);
+  font-family: var(--fl-sans);
+  font-size: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+
+  &:hover {
+    border-color: var(--fl-accent);
+    color: var(--fl-accent);
+    background: transparent;
+  }
+}
+.fl-tag-add--lg {
+  min-height: 24px;
+  height: auto;
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+// The article list keeps a styled empty state, matching the prototype.
+.fl-list > .mx-listview > ul > li.mx-listview-empty {
+  display: block;
+  padding: 60px 30px;
+  text-align: center;
+
+  label {
+    color: var(--fl-muted);
+    font-size: 13px;
+    font-weight: 400;
+    margin: 0;
+  }
+}
+
+.fl-empty {
+  padding: 60px 30px;
+  text-align: center;
+  color: var(--fl-muted);
+}
+.fl-empty-mark {
+  display: block;
+  font-size: 26px;
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+.fl-empty-text {
+  display: block;
+  font-size: 13px;
+}
+
+// ---------------------------------------------------------------------------
+// Detail pane
+// ---------------------------------------------------------------------------
+.fl-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--fl-detail);
+  min-width: 0;
+}
+
+.fl-detail-bar {
+  flex: none;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--fl-border-soft);
+  background: var(--fl-chrome);
+}
+.fl-btn--push { margin-left: auto; }
+
+// The three state buttons sit in a DataView (they need the active article's
+// context); `display: contents` dissolves its wrappers so the bar stays one
+// flex row.
+.fl-bar-ctx,
+.fl-bar-ctx > .mx-dataview-content {
+  display: contents;
+}
+
+.fl-detail-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 34px 0 60px;
+}
+.fl-article {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 0 40px;
+}
+.fl-article-src {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 16px;
+}
+.fl-article-srcname {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fl-ink-2);
+}
+.fl-article-host {
+  font-size: 11px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted-2);
+}
+.fl-article-title {
+  display: block;
+  font-family: var(--fl-serif);
+  font-size: 31px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: #f5f7fa;
+  text-wrap: pretty;
+  margin: 0 0 10px;
+}
+.fl-article-meta {
+  display: block;
+  font-size: 11px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted);
+  padding-bottom: 16px;
+  border-bottom: 1px solid #1d232b;
+}
+.fl-article-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 14px 0 4px;
+
+  .mx-listview,
+  .mx-listview > ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .mx-listview > ul > li { width: auto; }
+}
+.fl-tag-remove {
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+.fl-article-body {
+  font-family: var(--fl-serif);
+  font-size: 16.5px;
+  line-height: 1.68;
+  color: #c9d0da;
+  margin-top: 18px;
+}
+.fl-article-lead {
+  display: block;
+  font-size: 18px;
+  line-height: 1.6;
+  color: #e2e7ef;
+  margin-bottom: 22px;
+}
+.fl-article-p {
+  display: block;
+  margin: 0 0 20px;
+}
+
+.fl-next {
+  max-width: 540px;
+  margin: 34px auto 0;
+  padding: 16px 18px;
+  background: var(--fl-panel);
+  border: 1px solid #1d232b;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.fl-next-text { flex: 1; min-width: 0; }
+.fl-next-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fl-ink);
+}
+.fl-next-title {
+  display: block;
+  font-size: 12px;
+  color: var(--fl-ink-4);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
+// ---------------------------------------------------------------------------
+// Popup chrome
+// ---------------------------------------------------------------------------
+.fl-sheet.mx-window {
+  .modal-content {
+    background: var(--fl-sheet);
+    border: 1px solid var(--fl-border-strong);
+    border-radius: 13px;
+    box-shadow: 0 26px 70px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+  }
+
+  // Each sheet carries its own title and Close/Done button, so Mendix's
+  // header band (light, untheme-able without fighting Atlas) is dropped.
+  .modal-header {
+    display: none;
+  }
+
+  .modal-body,
+  .mx-scrollcontainer,
+  .region-content,
+  .mx-scrollcontainer-wrapper,
+  .mx-placeholder {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--fl-sheet);
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .mx-placeholder > div,
+  .mx-placeholder > div > .mx-dataview-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+}
+
+// The manage grid is the only sheet that scrolls: header and column titles
+// stay put while the feed list moves.
+.fl-sheet--manage {
+  .fl-manage-head,
+  .fl-grid-head,
+  .fl-sheet-foot {
+    flex: none;
+  }
+  .fl-manage-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+.fl-grid-tags {
+  .mx-listview,
+  .mx-listview > ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .mx-listview > ul > li { width: auto; }
+}
+
+// ---------------------------------------------------------------------------
+// Sheets (popup pages) — tag sheet, add feed, manage feeds, shortcuts
+// ---------------------------------------------------------------------------
+.fl-sheet {
+  background: var(--fl-sheet);
+  color: var(--fl-ink);
+  font-family: var(--fl-sans);
+  font-size: 13px;
+
+  .mx-dataview-content { padding: 0 !important; }
+}
+.fl-sheet-head {
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid #1d232b;
+}
+.fl-sheet-title {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--fl-ink-bright);
+  line-height: 1.35;
+  margin-top: 5px;
+}
+.fl-sheet-body { padding: 14px 18px 18px; }
+.fl-sheet-foot {
+  padding: 12px 18px;
+  border-top: 1px solid #1d232b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--fl-sidebar);
+}
+.fl-sheet-note {
+  font-size: 10.5px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted-2);
+}
+
+.fl-sheet-input {
+  display: flex;
+  gap: 8px;
+  padding: 14px 18px 4px;
+  align-items: center;
+
+  .mx-textbox, .form-group { flex: 1; margin: 0 !important; }
+  .control-label { display: none !important; }
+  input.form-control {
+    height: 36px;
+    padding: 0 11px;
+    background: var(--fl-sunken) !important;
+    border: 1px solid var(--fl-border-strong) !important;
+    border-radius: 7px;
+    color: var(--fl-ink) !important;
+    font-family: var(--fl-sans);
+    font-size: 13px;
+    box-shadow: none !important;
+  }
+}
+
+.fl-taglist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 9px;
+
+  .mx-listview > ul > li { margin-bottom: 4px; }
+}
+.fl-tagopt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid var(--fl-border-strong);
+  background: #141922;
+
+  &:hover { border-color: var(--fl-border-hover); }
+  &.is-on { background: rgba(200, 97, 58, 0.08); }
+}
+.fl-tagopt-mark {
+  width: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--fl-ink-3);
+  flex: none;
+}
+.fl-tagopt-label {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fl-ink-3);
+}
+.fl-tagopt.is-on .fl-tagopt-label,
+.fl-tagopt.is-on .fl-tagopt-mark { color: var(--fl-ink-bright); }
+.fl-tagopt-count {
+  font-size: 10.5px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted);
+}
+
+// --- Manage feeds grid -----------------------------------------------------
+.fl-manage-head {
+  flex: none;
+  padding: 16px 20px;
+  border-bottom: 1px solid #1d232b;
+}
+.fl-manage-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fl-ink-bright);
+}
+.fl-manage-sub {
+  display: block;
+  font-size: 11.5px;
+  color: var(--fl-ink-4);
+  margin-top: 2px;
+}
+.fl-grid-head,
+.fl-grid-row {
+  display: grid;
+  grid-template-columns: 250px 1fr 150px 110px;
+  gap: 14px;
+  align-items: center;
+}
+.fl-grid-head {
+  padding: 9px 20px;
+  background: var(--fl-sidebar);
+  border-bottom: 1px solid #1d232b;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
+}
+.fl-grid-row {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--fl-border-faint);
+}
+.fl-grid-feed {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.fl-grid-name {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fl-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-grid-host {
+  display: block;
+  font-size: 10.5px;
+  font-family: var(--fl-mono);
+  color: var(--fl-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fl-srctag {
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 10.5px;
+  font-weight: 500;
+  background: #1a2028;
+  border: 1px solid var(--fl-border-strong);
+  color: var(--fl-ink-3);
+  white-space: nowrap;
+}
+.fl-grid-interval {
+  font-size: 11.5px;
+  color: var(--fl-ink-4);
+}
+.fl-grid-count {
+  font-size: 11.5px;
+  font-family: var(--fl-mono);
+  color: var(--fl-ink-4);
+  text-align: right;
+}
+.fl-manage-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+
+
+}
+
+// --- Shortcuts sheet -------------------------------------------------------
+.fl-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--fl-border-faint);
+}
+.fl-key {
+  min-width: 26px;
+  text-align: center;
+  padding: 3px 6px;
+  background: var(--fl-raised);
+  border: 1px solid var(--fl-border-raised);
+  border-radius: 5px;
+  font-family: var(--fl-mono);
+  font-size: 11.5px;
+  color: var(--fl-ink);
+}
+.fl-shortcut-label {
+  font-size: 12.5px;
+  color: var(--fl-ink-2);
+}
+
+// --- Add-feed sheet --------------------------------------------------------
+.fl-field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fl-muted);
+  margin-bottom: 8px;
+}
+.fl-field-help {
+  display: block;
+  font-size: 11.5px;
+  color: var(--fl-muted);
+  margin-top: 9px;
+  line-height: 1.5;
+}
+// Why validation failed — unreachable host, HTTP status, or "not a feed".
+.fl-field-error {
+  display: block;
+  font-size: 11.5px;
+  color: #ff8a72;
+  background: rgba(255, 106, 77, 0.08);
+  border: 1px solid rgba(255, 106, 77, 0.28);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 10px;
+  line-height: 1.45;
+}
+.fl-url-input {
+  .mx-textbox, .form-group { margin: 0 !important; }
+  .control-label { display: none !important; }
+  input.form-control {
+    width: 100%;
+    height: 40px;
+    padding: 0 12px;
+    background: var(--fl-sunken) !important;
+    border: 1px solid var(--fl-border-strong) !important;
+    border-radius: 8px;
+    color: var(--fl-ink) !important;
+    font-family: var(--fl-mono);
+    font-size: 12.5px;
+    box-shadow: none !important;
+  }
+}
+.fl-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+.fl-detected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #101820;
+  border: 1px solid #1e3038;
+  border-radius: 8px;
+  margin-bottom: 18px;
+}
+.fl-detected-mark {
+  color: var(--fl-ok);
+  font-size: 14px;
+}
+.fl-detected-text {
+  font-size: 12.5px;
+  color: var(--fl-ink-2);
+}
+
+// --- Toast -----------------------------------------------------------------
+.fl-toast {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 17px;
+  background: #1a212b;
+  border: 1px solid var(--fl-border-raised);
+  border-radius: 9px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  font-size: 12.5px;
+  color: var(--fl-ink);
+  z-index: 40;
+}
+.fl-toast-mark {
+  color: var(--fl-ok);
+  font-size: 13px;
+}

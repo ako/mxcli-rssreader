@@ -1,0 +1,625 @@
+-- ---------------------------------------------------------------------------
+-- Feedline screens.
+--
+-- Reader is the whole app: a status strip, a topbar, and the three panes
+-- (sidebar / article list / detail). The prototype's four overlays become
+-- popup pages.
+--
+-- The shell is built from page widgets rather than Atlas navigation on
+-- purpose: the sidebar's chips, smart views and feed rows are all data-bound
+-- (unread counts, source-tag filters), which the Mendix navigation model
+-- cannot express. The theme hides the Atlas topbar/sidebar regions so the page
+-- owns the viewport.
+-- ---------------------------------------------------------------------------
+
+create or replace page Feedline.TagSheet
+(
+  params: { $View: Feedline.ReaderView },
+  title: 'Tag article',
+  layout: Atlas_Core.PopupLayout,
+  PopupWidth: 470,
+  PopupHeight: 560,
+  class: 'fl-sheet',
+  folder: 'Reader/Sheets'
+)
+{
+  dataview dvSheet (datasource: $View) {
+    container sheetHead (class: 'fl-sheet-head') {
+      dynamictext sheetKicker (content: 'Tag article', class: 'fl-section-label')
+      dataview dvSheetArticle (datasource: association Feedline.ReaderView_ActiveArticle) {
+        dynamictext sheetTitle (attribute: Title, class: 'fl-sheet-title')
+      }
+    }
+
+    container sheetInput (class: 'fl-sheet-input') {
+      textbox txtTagDraft (label: 'New tag', attribute: TagDraft)
+      actionbutton btnAddTag (caption: 'Add', action: microflow Feedline.ACT_CommitNewTag, class: 'fl-btn fl-btn--accent')
+    }
+
+    container sheetBody (class: 'fl-sheet-body') {
+      dynamictext existingLabel (content: 'Existing tags', class: 'fl-section-label')
+      container tagList (class: 'fl-taglist') {
+        listview lvTagOptions (datasource: database from Feedline.Tag sort by SortOrder asc) {
+          template tplTagOption {
+            container tagOpt (
+              class: 'fl-tagopt',
+              OnClick: microflow Feedline.ACT_ToggleTag("Tag": $currentObject),
+              dynamicclasses: '''fl-tagc-'' + $currentObject/Slug'
+            ) {
+              dynamictext tagOptMark (content: '＋', class: 'fl-tagopt-mark')
+              dynamictext tagOptLabel (attribute: Name, class: 'fl-tagopt-label')
+              dynamictext tagOptCount (content: '{1} tagged', contentparams: [{1} = ArticleCount], class: 'fl-tagopt-count')
+            }
+          }
+        }
+      }
+    }
+
+    container sheetFoot (class: 'fl-sheet-foot') {
+      dynamictext sheetNote (content: 'Mendix: Article_Tag association, popup page', class: 'fl-sheet-note')
+      actionbutton btnDone (caption: 'Done', action: close_page, class: 'fl-btn')
+    }
+  }
+}
+/
+
+-- ---------------------------------------------------------------------------
+-- Add feed — the prototype's two-step wizard.
+-- ---------------------------------------------------------------------------
+create or replace page Feedline.AddFeed
+(
+  params: { $View: Feedline.ReaderView },
+  title: 'Add feed',
+  layout: Atlas_Core.PopupLayout,
+  PopupWidth: 520,
+  PopupHeight: 420,
+  class: 'fl-sheet',
+  folder: 'Reader/Sheets'
+)
+{
+  dataview dvAddFeed (datasource: $View) {
+    container addHead (class: 'fl-sheet-head') {
+      dynamictext addTitle (content: 'Add feed', class: 'fl-manage-title')
+    }
+
+    container stepOne (class: 'fl-sheet-body', visible: [NewFeedStep = 0]) {
+      dynamictext urlLabel (content: 'Feed or site URL', class: 'fl-field-label')
+      container urlInput (class: 'fl-url-input') {
+        textbox txtFeedUrl (label: 'Feed URL', attribute: NewFeedUrl)
+      }
+      dynamictext urlHelp (
+        content: 'Paste a feed URL or a site address — autodiscovery will look for a linked feed. Import an OPML file to add many at once.',
+        class: 'fl-field-help'
+      )
+      -- Validation actually fetches the URL now, so it can actually fail;
+      -- this is where it says why (unreachable, HTTP error, not a feed).
+      dynamictext urlError (
+        attribute: DetectedError,
+        class: 'fl-field-error',
+        visible: [DetectedError != '']
+      )
+      container stepOneActions (class: 'fl-actions-row') {
+        actionbutton btnValidate (caption: 'Validate feed', action: microflow Feedline.ACT_ValidateFeed, class: 'fl-btn fl-btn--accent')
+        actionbutton btnOpml (caption: 'Import OPML…', action: close_page, class: 'fl-btn fl-btn--ghost')
+      }
+    }
+
+    container stepTwo (class: 'fl-sheet-body', visible: [NewFeedStep = 1]) {
+      container detected (class: 'fl-detected') {
+        dynamictext detectedMark (content: '✓', class: 'fl-detected-mark')
+        dynamictext detectedText (attribute: DetectedTitle, class: 'fl-detected-text')
+      }
+      dynamictext groupLabel (content: 'Group under source tags', class: 'fl-field-label')
+      container feedTagChips (class: 'fl-tagbar-chips') {
+        listview lvFeedTags (datasource: database from Feedline.SourceTag sort by SortOrder asc) {
+          template tplFeedTag {
+            dynamictext feedTagChip (attribute: Name, class: 'fl-chip')
+          }
+        }
+      }
+      dynamictext manualHelp (
+        content: 'The first batch is fetched as soon as you add the feed. After that, refreshing stays manual.',
+        class: 'fl-field-help'
+      )
+      container stepTwoActions (class: 'fl-actions-row') {
+        actionbutton btnCommitFeed (caption: 'Add feed', action: microflow Feedline.ACT_CommitFeed, class: 'fl-btn fl-btn--accent')
+      }
+    }
+  }
+}
+/
+
+-- ---------------------------------------------------------------------------
+-- Manage feeds & tags — Source ⇢ SourceTag, as a styled listview grid.
+-- ---------------------------------------------------------------------------
+create or replace page Feedline.ManageFeeds
+(
+  title: 'Manage feeds & tags',
+  layout: Atlas_Core.PopupLayout,
+  PopupWidth: 860,
+  PopupHeight: 720,
+  class: 'fl-sheet fl-sheet--manage',
+  folder: 'Reader/Sheets'
+)
+{
+  container manageHead (class: 'fl-manage-head') {
+    dynamictext manageTitle (content: 'Manage feeds & tags', class: 'fl-manage-title')
+    dynamictext manageSub (
+      content: 'Source tags group feeds in the sidebar and can be shared with article tags.',
+      class: 'fl-manage-sub'
+    )
+  }
+
+  container gridHead (class: 'fl-grid-head') {
+    dynamictext colFeed (content: 'Feed')
+    dynamictext colTags (content: 'Source tags')
+    dynamictext colRefresh (content: 'Last fetch')
+    dynamictext colCount (content: 'Articles', class: 'fl-grid-count')
+  }
+
+  container manageList (class: 'fl-manage-list') {
+    listview lvManage (datasource: database from Feedline.Source sort by SortOrder asc) {
+      template tplManage {
+        container gridRow (class: 'fl-grid-row') {
+          container gridFeed (class: 'fl-grid-feed') {
+            dynamictext mBadge (attribute: Mono, class: 'fl-badge', dynamicclasses: '''fl-tint-'' + $currentObject/Slug')
+            container gridFeedText (class: 'fl-feedrow-body') {
+              dynamictext mName (attribute: Name, class: 'fl-grid-name')
+              dynamictext mHost (attribute: Host, class: 'fl-grid-host')
+            }
+          }
+          container gridTags (class: 'fl-grid-tags') {
+            listview lvManageTags (datasource: association Feedline.Source_SourceTag) {
+              template tplManageTag {
+                dynamictext mTag (attribute: Name, class: 'fl-srctag')
+              }
+            }
+          }
+          -- How the last fetch went, per feed — more useful than the static
+          -- 'Manual only' interval now that Refresh really fetches.
+          dynamictext mInterval (attribute: LastFetchStatus, class: 'fl-grid-interval')
+          dynamictext mCount (attribute: ArticleCount, class: 'fl-grid-count')
+        }
+      }
+    }
+  }
+
+  container manageFoot (class: 'fl-sheet-foot') {
+    dynamictext manageNote (
+      content: 'Mendix: Source ⇢ SourceTag (many-to-many) · listview grid with popup editor',
+      class: 'fl-sheet-note'
+    )
+    actionbutton btnCloseManage (caption: 'Close', action: close_page, class: 'fl-btn')
+  }
+}
+/
+
+-- ---------------------------------------------------------------------------
+-- Keyboard shortcuts reference.
+--
+-- The keys themselves are not bound: Mendix has no page-level key handler, so
+-- this sheet documents the prototype's shortcut map rather than implementing
+-- it. Every shortcut has a clickable equivalent in the UI.
+-- ---------------------------------------------------------------------------
+create or replace page Feedline.Shortcuts
+(
+  title: 'Keyboard shortcuts',
+  layout: Atlas_Core.PopupLayout,
+  PopupWidth: 420,
+  PopupHeight: 480,
+  class: 'fl-sheet',
+  folder: 'Reader/Sheets'
+)
+{
+  container keysHead (class: 'fl-sheet-head') {
+    dynamictext keysTitle (content: 'Keyboard shortcuts', class: 'fl-manage-title')
+  }
+  container keysBody (class: 'fl-sheet-body') {
+    container k1 (class: 'fl-shortcut') {
+      dynamictext k1k (content: 'J', class: 'fl-key')
+      dynamictext k1l (content: 'Next article', class: 'fl-shortcut-label')
+    }
+    container k2 (class: 'fl-shortcut') {
+      dynamictext k2k (content: 'K', class: 'fl-key')
+      dynamictext k2l (content: 'Previous article', class: 'fl-shortcut-label')
+    }
+    container k3 (class: 'fl-shortcut') {
+      dynamictext k3k (content: 'R', class: 'fl-key')
+      dynamictext k3l (content: 'Refresh all feeds', class: 'fl-shortcut-label')
+    }
+    container k4 (class: 'fl-shortcut') {
+      dynamictext k4k (content: 'S', class: 'fl-key')
+      dynamictext k4l (content: 'Star / unstar', class: 'fl-shortcut-label')
+    }
+    container k5 (class: 'fl-shortcut') {
+      dynamictext k5k (content: 'B', class: 'fl-key')
+      dynamictext k5l (content: 'Save for later', class: 'fl-shortcut-label')
+    }
+    container k6 (class: 'fl-shortcut') {
+      dynamictext k6k (content: 'U', class: 'fl-key')
+      dynamictext k6l (content: 'Toggle read state', class: 'fl-shortcut-label')
+    }
+    container k7 (class: 'fl-shortcut') {
+      dynamictext k7k (content: 'T', class: 'fl-key')
+      dynamictext k7l (content: 'Open tag sheet', class: 'fl-shortcut-label')
+    }
+    container k8 (class: 'fl-shortcut') {
+      dynamictext k8k (content: '/', class: 'fl-key')
+      dynamictext k8l (content: 'Focus search', class: 'fl-shortcut-label')
+    }
+  }
+  container keysFoot (class: 'fl-sheet-foot') {
+    dynamictext keysNote (content: 'Reference only — every action has a button', class: 'fl-sheet-note')
+    actionbutton btnCloseKeys (caption: 'Close', action: close_page, class: 'fl-btn')
+  }
+}
+/
+
+create or replace page Feedline.Reader
+(
+  params: { $View: Feedline.ReaderView },
+  title: 'Feedline',
+  layout: Atlas_Core.Atlas_TopBar,
+  class: 'fl-app',
+  folder: 'Reader'
+)
+{
+  dataview dvRoot (datasource: $View, class: 'fl-root') {
+
+    -- Device status strip from the prototype's tablet frame.
+    container statusBar (class: 'fl-statusbar') {
+      dynamictext clock (content: '9:41')
+      container statusRight (class: 'fl-statusbar-right') {
+        dynamictext wifi (content: 'Wi-Fi')
+        dynamictext battery (content: '82%')
+      }
+    }
+
+    container topBar (class: 'fl-topbar') {
+      container brand (class: 'fl-brand') {
+        dynamictext brandMark (content: 'R', class: 'fl-brand-mark')
+        dynamictext brandName (content: 'Feedline', class: 'fl-brand-name')
+        dynamictext brandBadge (content: 'MX', class: 'fl-brand-badge')
+      }
+
+      container searchBox (class: 'fl-search') {
+        textbox txtQuery (
+          label: 'Search',
+          attribute: Query,
+          placeholder: 'Search all articles',
+          onchange: microflow Feedline.ACT_ApplyQuery
+        )
+        dynamictext searchKey (content: '/', class: 'fl-search-key')
+      }
+
+      container topRight (class: 'fl-topbar-right') {
+        container refreshMeta (class: 'fl-refresh-meta') {
+          dynamictext refreshLabel (content: 'Last refresh', class: 'fl-refresh-label')
+          dynamictext refreshValue (attribute: LastRefresh, class: 'fl-refresh-value')
+        }
+        actionbutton btnRefresh (caption: '↻  Refresh', action: microflow Feedline.ACT_RefreshFeeds, class: 'fl-btn')
+        actionbutton btnKeys (caption: '?', action: show_page Feedline.Shortcuts, class: 'fl-btn fl-btn--icon')
+        actionbutton btnAddFeed (caption: '＋  Add feed', action: show_page Feedline.AddFeed, class: 'fl-btn fl-btn--accent')
+      }
+    }
+
+    container appBody (class: 'fl-body') {
+
+      -- ---------------------------------------------------------------
+      -- Sidebar: source-tag chips, smart views, feeds
+      -- ---------------------------------------------------------------
+      container sidebar (class: 'fl-sidebar') {
+
+        container tagBar (class: 'fl-tagbar') {
+          dynamictext tagBarLabel (content: 'Source tags', class: 'fl-section-label')
+          container tagBarChips (class: 'fl-tagbar-chips') {
+            container chipAll (
+              class: 'fl-chip',
+              OnClick: microflow Feedline.ACT_ClearSourceTag,
+              dynamicclasses: 'if $View/Feedline.ReaderView_SourceTag = empty then ''is-on'' else '''''
+            ) {
+              dynamictext chipAllText (content: 'All')
+            }
+            listview lvSourceTags (datasource: database from Feedline.SourceTag sort by SortOrder asc) {
+              template tplSourceTag {
+                container chipTag (
+                  class: 'fl-chip',
+                  OnClick: microflow Feedline.ACT_SelectSourceTag("SourceTag": $currentObject),
+                  dynamicclasses: 'if $View/Feedline.ReaderView_SourceTag = $currentObject then ''is-on'' else '''''
+                ) {
+                  dynamictext chipTagText (attribute: Name)
+                }
+              }
+            }
+          }
+        }
+
+        container smartViews (class: 'fl-smartviews') {
+          container navAll (
+            class: 'fl-navrow',
+            OnClick: microflow Feedline.ACT_ViewAll,
+            dynamicclasses: 'if $View/Kind = Feedline.ViewKind.All then ''is-on'' else '''''
+          ) {
+            dynamictext navAllIcon (content: '≡', class: 'fl-navrow-icon')
+            dynamictext navAllLabel (content: 'All articles', class: 'fl-navrow-label')
+            dynamictext navAllCount (attribute: CountAll, class: 'fl-navrow-count')
+          }
+          container navUnread (
+            class: 'fl-navrow',
+            OnClick: microflow Feedline.ACT_ViewUnread,
+            dynamicclasses: 'if $View/Kind = Feedline.ViewKind.Unread then ''is-on'' else '''''
+          ) {
+            dynamictext navUnreadIcon (content: '●', class: 'fl-navrow-icon')
+            dynamictext navUnreadLabel (content: 'Unread', class: 'fl-navrow-label')
+            dynamictext navUnreadCount (attribute: CountUnread, class: 'fl-navrow-count')
+          }
+          container navStarred (
+            class: 'fl-navrow',
+            OnClick: microflow Feedline.ACT_ViewStarred,
+            dynamicclasses: 'if $View/Kind = Feedline.ViewKind.Starred then ''is-on'' else '''''
+          ) {
+            dynamictext navStarredIcon (content: '★', class: 'fl-navrow-icon fl-navrow-icon--star')
+            dynamictext navStarredLabel (content: 'Starred', class: 'fl-navrow-label')
+            dynamictext navStarredCount (attribute: CountStarred, class: 'fl-navrow-count')
+          }
+          container navSaved (
+            class: 'fl-navrow',
+            OnClick: microflow Feedline.ACT_ViewSaved,
+            dynamicclasses: 'if $View/Kind = Feedline.ViewKind.Saved then ''is-on'' else '''''
+          ) {
+            dynamictext navSavedIcon (content: '⌸', class: 'fl-navrow-icon')
+            dynamictext navSavedLabel (content: 'Read later', class: 'fl-navrow-label')
+            dynamictext navSavedCount (attribute: CountSaved, class: 'fl-navrow-count')
+          }
+        }
+
+        container feedsHeader (class: 'fl-feeds-header') {
+          dynamictext feedsLabel (content: 'Feeds', class: 'fl-section-label')
+          dynamictext feedsCount (attribute: SourceCountLabel, class: 'fl-feeds-count')
+        }
+
+        container feedsList (class: 'fl-feeds') {
+          listview lvFeeds (datasource: microflow Feedline.DS_Sources) {
+            template tplFeed {
+              container feedRow (
+                class: 'fl-feedrow',
+                OnClick: microflow Feedline.ACT_SelectSource("Source": $currentObject),
+                dynamicclasses: 'if $View/Feedline.ReaderView_Source = $currentObject then ''is-on'' else '''''
+              ) {
+                dynamictext feedBadge (
+                  attribute: Mono,
+                  class: 'fl-badge',
+                  dynamicclasses: '''fl-tint-'' + $currentObject/Slug'
+                )
+                container feedBody (class: 'fl-feedrow-body') {
+                  dynamictext feedName (attribute: Name, class: 'fl-feedrow-name')
+                  dynamictext feedTagLine (attribute: TagLine, class: 'fl-feedrow-tagline')
+                }
+                dynamictext feedUnread (attribute: UnreadCount, class: 'fl-feedrow-unread', visible: [UnreadCount > 0])
+              }
+            }
+          }
+        }
+
+        container manageRow (class: 'fl-manage', OnClick: show_page Feedline.ManageFeeds) {
+          dynamictext manageIcon (content: '⚙')
+          dynamictext manageText (content: 'Manage feeds & tags')
+        }
+      }
+
+      -- ---------------------------------------------------------------
+      -- Middle pane: the article list
+      -- ---------------------------------------------------------------
+      container listPane (class: 'fl-list-pane') {
+        container listHead (class: 'fl-list-head') {
+          container listHeadText (class: 'fl-list-head-text') {
+            dynamictext listTitle (attribute: ListTitle, class: 'fl-list-title')
+            dynamictext listSub (attribute: ListSub, class: 'fl-list-sub')
+          }
+          actionbutton btnClear (
+            caption: 'Clear',
+            action: microflow Feedline.ACT_ClearView,
+            class: 'fl-btn fl-btn--sm',
+            visible: [Kind != Feedline.ViewKind.All or Query != '']
+          )
+          actionbutton btnMarkAllRead (caption: 'Mark all read', action: microflow Feedline.ACT_MarkAllRead, class: 'fl-btn fl-btn--sm')
+        }
+
+        container listScroll (class: 'fl-list') {
+          listview lvArticles (datasource: microflow Feedline.DS_Articles) {
+            template tplArticle {
+              container articleRow (
+                class: 'fl-row',
+                OnClick: microflow Feedline.ACT_OpenArticle("Article": $currentObject),
+                dynamicclasses: 'if $View/Feedline.ReaderView_ActiveArticle = $currentObject then ''is-active'' else if $currentObject/IsRead then ''is-read'' else ''is-unread'''
+              ) {
+                container rowMain (class: 'fl-row-main') {
+                  container rowMeta (class: 'fl-row-meta') {
+                    dynamictext rowBadge (
+                      content: '{1}',
+                      contentparams: [{1} = Article_Source/Mono],
+                      class: 'fl-badge fl-badge--sm',
+                      dynamicclasses: '''fl-tint-'' + $currentObject/SourceSlug'
+                    )
+                    dynamictext rowSource (content: '{1}', contentparams: [{1} = Article_Source/Name], class: 'fl-row-src')
+                    dynamictext rowDot (content: '·', class: 'fl-row-dot')
+                    dynamictext rowTime (attribute: TimeLabel, class: 'fl-row-time')
+                    dynamictext rowWords (content: '{1} words', contentparams: [{1} = Words], class: 'fl-row-words')
+                  }
+                  dynamictext rowTitle (attribute: Title, class: 'fl-row-title')
+                  dynamictext rowExcerpt (attribute: Excerpt, class: 'fl-row-excerpt')
+                  container rowTags (class: 'fl-row-tags') {
+                    listview lvRowTags (datasource: association Feedline.Article_Tag) {
+                      template tplRowTag {
+                        dynamictext rowTagChip (
+                          attribute: Name,
+                          class: 'fl-tag',
+                          dynamicclasses: '''fl-tagc-'' + $currentObject/Slug'
+                        )
+                      }
+                    }
+                    actionbutton btnRowAddTag (
+                      caption: '＋ tag',
+                      action: microflow Feedline.ACT_OpenTagSheetFor("Article": $currentObject),
+                      class: 'fl-tag-add'
+                    )
+                  }
+                }
+                container rowSide (class: 'fl-row-side') {
+                  dynamictext rowThumb (
+                    content: '{1}',
+                    contentparams: [{1} = Article_Source/Mono],
+                    class: 'fl-thumb',
+                    dynamicclasses: '''fl-tint-'' + $currentObject/SourceSlug'
+                  )
+                  container rowActions (class: 'fl-row-actions') {
+                    actionbutton btnRowStarOff (
+                      caption: '☆',
+                      action: microflow Feedline.ACT_ToggleStar("Article": $currentObject),
+                      class: 'fl-iconbtn',
+                      visible: [not(IsStarred)]
+                    )
+                    actionbutton btnRowStarOn (
+                      caption: '★',
+                      action: microflow Feedline.ACT_ToggleStar("Article": $currentObject),
+                      class: 'fl-iconbtn is-on',
+                      visible: [IsStarred]
+                    )
+                    actionbutton btnRowSaveOff (
+                      caption: '⌷',
+                      action: microflow Feedline.ACT_ToggleSave("Article": $currentObject),
+                      class: 'fl-iconbtn',
+                      visible: [not(IsSaved)]
+                    )
+                    actionbutton btnRowSaveOn (
+                      caption: '⌸',
+                      action: microflow Feedline.ACT_ToggleSave("Article": $currentObject),
+                      class: 'fl-iconbtn fl-iconbtn--save is-on',
+                      visible: [IsSaved]
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      -- ---------------------------------------------------------------
+      -- Detail pane
+      -- ---------------------------------------------------------------
+      container detailPane (class: 'fl-detail') {
+        -- The star / read-later state lives on the active article, and a widget
+        -- expression cannot cross the association to reach it — so these three
+        -- buttons sit in a DataView on the article. `display: contents` in the
+        -- theme keeps the bar a single flex row.
+        container detailBar (class: 'fl-detail-bar') {
+          dataview dvDetailBar (datasource: association Feedline.ReaderView_ActiveArticle, class: 'fl-bar-ctx') {
+            actionbutton btnStarOff (
+              caption: '☆ Star',
+              action: microflow Feedline.ACT_StarActive,
+              class: 'fl-btn fl-btn--ghost',
+              visible: [not(IsStarred)]
+            )
+            actionbutton btnStarOn (
+              caption: '★ Starred',
+              action: microflow Feedline.ACT_StarActive,
+              class: 'fl-btn fl-btn--ghost fl-btn--star is-on',
+              visible: [IsStarred]
+            )
+            actionbutton btnSaveOff (
+              caption: '⌷ Read later',
+              action: microflow Feedline.ACT_SaveActive,
+              class: 'fl-btn fl-btn--ghost',
+              visible: [not(IsSaved)]
+            )
+            actionbutton btnSaveOn (
+              caption: '⌸ Saved',
+              action: microflow Feedline.ACT_SaveActive,
+              class: 'fl-btn fl-btn--ghost fl-btn--save is-on',
+              visible: [IsSaved]
+            )
+            actionbutton btnMarkRead (
+              caption: 'Mark read',
+              action: microflow Feedline.ACT_ToggleReadActive,
+              class: 'fl-btn fl-btn--ghost',
+              visible: [not(IsRead)]
+            )
+            actionbutton btnMarkUnread (
+              caption: 'Mark unread',
+              action: microflow Feedline.ACT_ToggleReadActive,
+              class: 'fl-btn fl-btn--ghost',
+              visible: [IsRead]
+            )
+            actionbutton btnAddTag (caption: '＋ Add tag', action: show_page Feedline.TagSheet, class: 'fl-btn fl-btn--push')
+            -- Inside the DataView so the nanoflow receives the open article.
+            actionbutton btnOpenOriginal (
+              caption: '↗ Open original',
+              action: nanoflow Feedline.NF_OpenOriginal("Article": $currentObject),
+              class: 'fl-btn fl-btn--ghost'
+            )
+          }
+        }
+
+        container detailScroll (class: 'fl-detail-scroll') {
+          dataview dvActive (datasource: association Feedline.ReaderView_ActiveArticle, class: 'fl-article') {
+            container articleSrc (class: 'fl-article-src') {
+              dynamictext artBadge (
+                content: '{1}',
+                contentparams: [{1} = Article_Source/Mono],
+                class: 'fl-badge fl-badge--lg',
+                dynamicclasses: '''fl-tint-'' + $currentObject/SourceSlug'
+              )
+              dynamictext artSrcName (content: '{1}', contentparams: [{1} = Article_Source/Name], class: 'fl-article-srcname')
+              dynamictext artHost (content: '{1}', contentparams: [{1} = Article_Source/Host], class: 'fl-article-host')
+            }
+            dynamictext artTitle (attribute: Title, class: 'fl-article-title')
+            dynamictext artMeta (attribute: MetaLine, class: 'fl-article-meta')
+
+            container artTags (class: 'fl-article-tags') {
+              listview lvArtTags (datasource: association Feedline.Article_Tag) {
+                template tplArtTag {
+                  container artTagChip (
+                    class: 'fl-tag fl-tag--lg',
+                    OnClick: microflow Feedline.ACT_RemoveTag("Tag": $currentObject),
+                    dynamicclasses: '''fl-tagc-'' + $currentObject/Slug'
+                  ) {
+                    dynamictext artTagName (attribute: Name)
+                    dynamictext artTagRemove (content: '×', class: 'fl-tag-remove')
+                  }
+                }
+              }
+              actionbutton btnTagThis (caption: '＋ tag this article', action: show_page Feedline.TagSheet, class: 'fl-tag-add fl-tag-add--lg')
+            }
+
+            container artBody (class: 'fl-article-body') {
+              dynamictext artLead (attribute: Excerpt, class: 'fl-article-lead')
+              dynamictext artP1 (attribute: BodyP1, class: 'fl-article-p', visible: [BodyP1 != ''])
+              dynamictext artP2 (attribute: BodyP2, class: 'fl-article-p', visible: [BodyP2 != ''])
+              dynamictext artP3 (attribute: BodyP3, class: 'fl-article-p', visible: [BodyP3 != ''])
+              dynamictext artP4 (attribute: BodyP4, class: 'fl-article-p', visible: [BodyP4 != ''])
+            }
+          }
+
+          container nextCard (class: 'fl-next') {
+            container nextText (class: 'fl-next-text') {
+              dynamictext nextLabel (content: 'Next in this view', class: 'fl-next-label')
+              dynamictext nextTitle (attribute: NextTitle, class: 'fl-next-title')
+            }
+            actionbutton btnNext (caption: 'Next  J', action: microflow Feedline.ACT_NextArticle, class: 'fl-btn')
+          }
+        }
+      }
+    }
+
+    container toast (class: 'fl-toast', OnClick: microflow Feedline.ACT_DismissToast, visible: [Toast != '']) {
+      dynamictext toastMark (content: '✓', class: 'fl-toast-mark')
+      dynamictext toastText (attribute: Toast)
+    }
+  }
+}
+/
+
+-- ---------------------------------------------------------------------------
+-- Tag sheet — add or remove tags on the active article.
+-- ---------------------------------------------------------------------------

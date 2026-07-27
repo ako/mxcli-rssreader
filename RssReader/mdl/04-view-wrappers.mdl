@@ -1,0 +1,155 @@
+-- ---------------------------------------------------------------------------
+-- Smart-view wrappers.
+--
+-- A Mendix button can map an object from the page context but cannot pass a
+-- literal argument, so the four sidebar entries each need a thin wrapper that
+-- supplies its ViewKind to the shared ACT_SelectView.
+-- ---------------------------------------------------------------------------
+
+/**
+ * Show every article.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_ViewAll (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic/Views'
+begin
+  $r = call microflow Feedline.ACT_SelectView(View = $View, Kind = Feedline.ViewKind.All);
+  return $r;
+end;
+/
+
+/**
+ * Show unread articles only.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_ViewUnread (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic/Views'
+begin
+  $r = call microflow Feedline.ACT_SelectView(View = $View, Kind = Feedline.ViewKind.Unread);
+  return $r;
+end;
+/
+
+/**
+ * Show starred articles.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_ViewStarred (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic/Views'
+begin
+  $r = call microflow Feedline.ACT_SelectView(View = $View, Kind = Feedline.ViewKind.Starred);
+  return $r;
+end;
+/
+
+/**
+ * Show articles saved for later.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_ViewSaved (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic/Views'
+begin
+  $r = call microflow Feedline.ACT_SelectView(View = $View, Kind = Feedline.ViewKind.Saved);
+  return $r;
+end;
+/
+
+/**
+ * Move the add-feed wizard to its second step once a URL has been entered.
+ *
+ * There is no fetcher yet, so "validation" is the shape of the interaction
+ * rather than a real network call — the sheet reports what a valid feed would
+ * look like and lets the user pick source tags.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_ValidateFeed (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic/Views'
+begin
+  if length(trim($View/NewFeedUrl)) < 5 then
+    return true;
+  end if;
+  change $View (
+    NewFeedStep = 1,
+    DetectedTitle = 'Valid feed · Atom 1.0 · 24 items · updated 2h ago') refresh;
+  return true;
+end;
+/
+
+/**
+ * Add the feed from the wizard and close the sheet.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_CommitFeed (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic/Views'
+begin
+  declare $Url string = trim($View/NewFeedUrl);
+  if $Url = '' then
+    return true;
+  end if;
+  retrieve $AllSources from Feedline.Source;
+  $Order = count($AllSources);
+  $Source = create Feedline.Source (
+    Name = $Url,
+    Host = $Url,
+    FeedUrl = $Url,
+    Mono = '?',
+    Slug = 'custom',
+    TagLine = 'Newly added',
+    SortOrder = $Order + 1);
+  commit $Source;
+  change $View (
+    NewFeedUrl = '',
+    NewFeedStep = 0,
+    Toast = 'Feed added · tap Refresh to fetch articles') refresh;
+  $r = call microflow Feedline.SUB_RefreshView(View = $View);
+  close page;
+  return $r;
+end;
+/
+
+/**
+ * Dismiss the toast strip.
+ *
+ * @param $View The reader state
+ * @returns true
+ */
+create or replace microflow Feedline.ACT_DismissToast (
+  $View: Feedline.ReaderView
+)
+returns boolean as $ok
+folder 'Logic/Views'
+begin
+  change $View (Toast = '') refresh;
+  return true;
+end;
+/

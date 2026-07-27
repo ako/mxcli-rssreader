@@ -1,0 +1,212 @@
+-- ---------------------------------------------------------------------------
+-- Feedline domain model
+--
+-- Re-runnable: `create or modify` preserves attribute identity as of mxcli
+-- a4eb812 (PR 48), so re-applying this script against an existing project is a
+-- no-op rather than a schema rewrite. On earlier builds it silently emptied
+-- every column — see MXCLI-FINDINGS.md #13.
+--
+-- Because `create or modify` is authoritative, this file must list EVERY
+-- attribute. An attribute added later by `alter entity` and not repeated here
+-- would be dropped the next time this script runs.
+--
+-- Mirrors the "RSS Reader" design prototype:
+--   Source   ⇢ SourceTag  (many-to-many, groups feeds in the sidebar)
+--   Article  ⇢ Source     (many-to-one)
+--   Article  ⇢ Tag        (many-to-many, the shared tag layer)
+--   ReaderView            (non-persistent screen state: filter, query, selection)
+--
+-- Unread/article counters are denormalised onto Source/Tag/SourceTag and
+-- recalculated by RecalculateCounts, so the sidebar can bind them directly
+-- instead of needing an aggregate per row.
+-- ---------------------------------------------------------------------------
+
+create module Feedline;
+/
+
+/**
+ * Which slice of articles the middle pane is showing.
+ */
+create or modify enumeration Feedline.ViewKind (
+  All 'All articles',
+  Unread 'Unread',
+  Starred 'Starred',
+  Saved 'Read later',
+  Source 'Source',
+  Tag 'Tag'
+);
+/
+
+/**
+ * A grouping label for feeds (Tech, Dev, Low-code, ...). Shown as the chip row
+ * at the top of the sidebar.
+ */
+create or modify persistent entity Feedline.SourceTag (
+  Name: string(50) not null,
+  SortOrder: integer default 0
+);
+/
+
+/**
+ * A subscribed feed.
+ *
+ * Slug drives the badge colour: the theme generates one .fl-tint-<slug> class
+ * per source, selected with a DynamicClasses expression (a widget cannot carry
+ * a computed inline style).
+ */
+create or modify persistent entity Feedline.Source (
+  Name: string(100) not null,
+  Host: string(200),
+  FeedUrl: string(500),
+  Mono: string(4),
+  Slug: string(40),
+  RefreshInterval: string(50) default 'Manual only',
+  -- Outcome of the last fetch, shown in Manage feeds & tags.
+  LastFetchStatus: string(200) default 'never fetched',
+  LastFetchNew: integer default 0,
+  UnreadCount: integer default 0,
+  ArticleCount: integer default 0,
+  TagLine: string(200),
+  SortOrder: integer default 0
+);
+/
+
+/**
+ * An article tag. Tags are first-class objects (not a string list) so they can
+ * be renamed, counted and coloured — the point the prototype's "The tag is the
+ * interface" article makes.
+ */
+create or modify persistent entity Feedline.Tag (
+  Name: string(50) not null,
+  Slug: string(40),
+  ArticleCount: integer default 0,
+  SortOrder: integer default 0
+);
+/
+
+/**
+ * A fetched article.
+ */
+create or modify persistent entity Feedline.Article (
+  Title: string(300) not null,
+  Excerpt: string(1000),
+  -- The detail pane renders the body as separate <p> blocks, so each paragraph
+  -- is its own attribute (and its own dynamictext with its own visibility)
+  -- rather than one blob with newlines.
+  BodyP1: string(2000),
+  BodyP2: string(2000),
+  BodyP3: string(2000),
+  BodyP4: string(2000),
+  -- Denormalised from the owning feed: a widget expression cannot traverse an
+  -- association (CE0117), and the badge tint is picked by a DynamicClasses
+  -- expression on the article itself.
+  SourceSlug: string(40),
+  -- The article's own URL, from <link> (RSS) or <link href="…"> (Atom).
+  -- Doubles as the dedupe key across refreshes.
+  Link: string(1000),
+  -- Raw <pubDate>/<updated> text, kept so a parse failure is diagnosable
+  -- rather than silently becoming "now".
+  PubDateRaw: string(100),
+  Minutes: integer default 0,
+  Words: integer default 0,
+  IsRead: boolean default false,
+  IsStarred: boolean default false,
+  IsSaved: boolean default false,
+  PublishedAt: datetime,
+  TimeLabel: string(20),
+  MetaLine: string(200),
+  SortOrder: integer default 0
+);
+/
+
+/**
+ * Screen state for the reader: which view is selected, the search box, the
+ * active article and the sidebar filter. Non-persistent — one per session.
+ */
+create or modify non-persistent entity Feedline.ReaderView (
+  Kind: Feedline.ViewKind default All,
+  Query: string(200),
+  ListTitle: string(200),
+  ListSub: string(200),
+  LastRefresh: string(50) default 'just now',
+  RefreshLabel: string(30) default 'Refresh',
+  SourceCountLabel: string(50),
+  CountAll: integer default 0,
+  CountUnread: integer default 0,
+  CountStarred: integer default 0,
+  CountSaved: integer default 0,
+  TagDraft: string(50),
+  NextTitle: string(300),
+  Toast: string(200),
+  NewFeedUrl: string(500),
+  NewFeedStep: integer default 0,
+  -- What the add-feed wizard reports back after actually fetching the URL:
+  -- DetectedTitle is the human summary line, DetectedFeedName/DetectedHost are
+  -- what the Source is created from once the user confirms.
+  DetectedTitle: string(200),
+  DetectedFeedName: string(200),
+  DetectedHost: string(200),
+  DetectedError: string(200)
+);
+/
+
+-- --- Associations ----------------------------------------------------------
+
+/**
+ * Every article comes from exactly one feed.
+ */
+create or replace association Feedline.Article_Source
+from Feedline.Article to Feedline.Source
+type reference
+delete_behavior DELETE_AND_REFERENCES;
+/
+
+/**
+ * The shared tag layer: an article carries many tags, a tag spans many articles.
+ */
+create or replace association Feedline.Article_Tag
+from Feedline.Article to Feedline.Tag
+type reference_set
+owner both;
+/
+
+/**
+ * Source tags group feeds in the sidebar.
+ */
+create or replace association Feedline.Source_SourceTag
+from Feedline.Source to Feedline.SourceTag
+type reference_set
+owner both;
+/
+
+/**
+ * The article currently open in the detail pane.
+ */
+create or replace association Feedline.ReaderView_ActiveArticle
+from Feedline.ReaderView to Feedline.Article
+type reference;
+/
+
+/**
+ * Set when the view is filtered to a single feed (Kind = Source).
+ */
+create or replace association Feedline.ReaderView_Source
+from Feedline.ReaderView to Feedline.Source
+type reference;
+/
+
+/**
+ * Set when the view is filtered to a single article tag (Kind = Tag).
+ */
+create or replace association Feedline.ReaderView_Tag
+from Feedline.ReaderView to Feedline.Tag
+type reference;
+/
+
+/**
+ * The sidebar source-tag chip filter ("All" = empty).
+ */
+create or replace association Feedline.ReaderView_SourceTag
+from Feedline.ReaderView to Feedline.SourceTag
+type reference;
+/

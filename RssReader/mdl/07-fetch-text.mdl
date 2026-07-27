@@ -1,0 +1,314 @@
+-- ---------------------------------------------------------------------------
+-- Text helpers for the feed parser.
+--
+-- RSS/Atom is XML, and `rest call … returns string` hands back the raw body,
+-- so the extraction is done with Mendix's own string functions. That keeps the
+-- whole fetcher in MDL — no Java action, no import mapping, and no XSD (which
+-- would not survive the "three malformed variants that make up most of the
+-- real web" anyway).
+-- ---------------------------------------------------------------------------
+
+/**
+ * Decode the XML/HTML entities that actually show up in feed titles.
+ *
+ * Both numeric forms are handled: decimal (&#8217;) and hexadecimal (&#x27;).
+ * Hex is not a rare curiosity — WordPress and the Hacker News firehose emit
+ * &#x27; for a plain apostrophe, which is why raw entity text was leaking into
+ * article titles before this covered it.
+ *
+ * The list is the references that actually appear in feeds rather than the
+ * full HTML5 set; anything left over renders as-is, which is a better failure
+ * mode than dropping the text.
+ *
+ * @param $S Raw text
+ * @returns Decoded text
+ */
+create or replace microflow Feedline.SUB_DecodeEntities (
+  $S: string
+)
+returns string as $Out
+folder 'Fetch/Text'
+begin
+  declare $Out string = $S;
+  -- Hex references are case-insensitive in both the 'x' and the digits, so
+  -- normalise once instead of listing every spelling below.
+  set $Out = replaceAll($Out, '&#X', '&#x');
+  set $Out = replaceAll($Out, '&#x0*27;', '''');
+  set $Out = replaceAll($Out, '&#x0*2019;', '''');
+  set $Out = replaceAll($Out, '&#x0*2018;', '''');
+  set $Out = replaceAll($Out, '&#x0*201[Cc];', '“');
+  set $Out = replaceAll($Out, '&#x0*201[Dd];', '”');
+  set $Out = replaceAll($Out, '&#x0*2013;', '–');
+  set $Out = replaceAll($Out, '&#x0*2014;', '—');
+  set $Out = replaceAll($Out, '&#x0*2026;', '…');
+  set $Out = replaceAll($Out, '&#x0*22;', '"');
+  set $Out = replaceAll($Out, '&#x0*[Aa]0;', ' ');
+  set $Out = replaceAll($Out, '&#x0*3[Cc];', '<');
+  set $Out = replaceAll($Out, '&#x0*3[Ee];', '>');
+  -- &#x26; last among the hex forms, for the same reason as &amp; below.
+  set $Out = replaceAll($Out, '&#x0*26;', '&');
+  set $Out = replaceAll($Out, '&#8217;', '''');
+  set $Out = replaceAll($Out, '&#8216;', '''');
+  set $Out = replaceAll($Out, '&#8220;', '“');
+  set $Out = replaceAll($Out, '&#8221;', '”');
+  set $Out = replaceAll($Out, '&#8211;', '–');
+  set $Out = replaceAll($Out, '&#8212;', '—');
+  set $Out = replaceAll($Out, '&#8230;', '…');
+  set $Out = replaceAll($Out, '&#160;', ' ');
+  set $Out = replaceAll($Out, '&#39;', '''');
+  set $Out = replaceAll($Out, '&#34;', '"');
+  set $Out = replaceAll($Out, '&apos;', '''');
+  set $Out = replaceAll($Out, '&quot;', '"');
+  set $Out = replaceAll($Out, '&nbsp;', ' ');
+  set $Out = replaceAll($Out, '&hellip;', '…');
+  set $Out = replaceAll($Out, '&rsquo;', '''');
+  set $Out = replaceAll($Out, '&lsquo;', '''');
+  set $Out = replaceAll($Out, '&ldquo;', '“');
+  set $Out = replaceAll($Out, '&rdquo;', '”');
+  set $Out = replaceAll($Out, '&ndash;', '–');
+  set $Out = replaceAll($Out, '&mdash;', '—');
+  set $Out = replaceAll($Out, '&lt;', '<');
+  set $Out = replaceAll($Out, '&gt;', '>');
+  -- &amp; last, so a double-encoded &amp;lt; resolves in the right order.
+  set $Out = replaceAll($Out, '&amp;', '&');
+  return $Out;
+end;
+/
+
+/**
+ * The display host for a feed URL — scheme, 'www.' and path removed.
+ *
+ * Used to label a feed added through the wizard the way the seeded ones are
+ * labelled ("techcrunch.com" rather than the full feed URL).
+ *
+ * @param $Url A feed or site URL
+ * @returns The bare host, or the input trimmed if it does not look like a URL
+ */
+create or replace microflow Feedline.SUB_HostFromUrl (
+  $Url: string
+)
+returns string as $Out
+folder 'Fetch/Text'
+begin
+  declare $Out string = trim($Url);
+  set $Out = replaceAll($Out, '^[A-Za-z][A-Za-z0-9+.-]*://', '');
+  set $Out = replaceAll($Out, '^www\.', '');
+  declare $Slash integer = find($Out, '/');
+  if $Slash > 0 then
+    set $Out = substring($Out, 0, $Slash);
+  end if;
+  -- Strip any userinfo/port that survived.
+  set $Out = replaceAll($Out, '^[^@]*@', '');
+  set $Out = replaceAll($Out, ':[0-9]+$', '');
+  return toLowerCase($Out);
+end;
+/
+
+/**
+ * Turn a feed's HTML description into plain reading text.
+ *
+ * Tags are stripped twice, on purpose. Feeds carry their markup in two forms:
+ * some put real tags in a CDATA block, others escape them, so the description
+ * arrives as '&lt;p&gt;&lt;a href="…"&gt;'. Stripping once and then decoding
+ * turns the escaped form back into visible '<p><a href="…">' text — which is
+ * exactly what Lobsters excerpts looked like before this. Strip, decode, strip
+ * again handles both without special-casing either.
+ *
+ * @param $S Raw description markup
+ * @returns Plain text
+ */
+create or replace microflow Feedline.SUB_StripHtml (
+  $S: string
+)
+returns string as $Out
+folder 'Fetch/Text'
+begin
+  declare $T string = $S;
+  set $T = replaceAll($T, '<!\[CDATA\[', '');
+  set $T = replaceAll($T, '\]\]>', '');
+  set $T = replaceAll($T, '<[^>]*>', ' ');
+  $Decoded = call microflow Feedline.SUB_DecodeEntities(S = $T);
+  declare $Out string = replaceAll($Decoded, '<[^>]*>', ' ');
+  set $Out = replaceAll($Out, '\s+', ' ');
+  return trim($Out);
+end;
+/
+
+/**
+ * Inner text of the first <Tag>…</Tag> in Xml.
+ *
+ * Scans past the opening tag's attributes rather than assuming '<tag>', so
+ * '<title type="html">' works as well as '<title>'. Returns '' when the tag is
+ * absent — every caller treats that as "field not present".
+ *
+ * @param $Xml The XML fragment to search
+ * @param $Tag Tag name without angle brackets
+ * @returns The element's inner text, or ''
+ */
+create or replace microflow Feedline.SUB_InnerText (
+  $Xml: string,
+  $Tag: string
+)
+returns string as $Out
+folder 'Fetch/Text'
+begin
+  declare $Out string = '';
+  declare $Open integer = find($Xml, '<' + $Tag);
+  if $Open < 0 then
+    return '';
+  end if;
+  -- The character after the tag name must be a delimiter, otherwise '<link'
+  -- would also match '<linkotherthing'. Testing "is not a name character"
+  -- covers '>', space, tab and newline without needing a literal newline in
+  -- the source (an MDL string cannot span lines).
+  declare $After string = substring($Xml, $Open + length($Tag) + 1, 1);
+  if replaceAll($After, '[A-Za-z0-9_:.-]', '') = '' then
+    return '';
+  end if;
+  declare $GtPos integer = find($Xml, '>', $Open);
+  if $GtPos < 0 then
+    return '';
+  end if;
+  -- A self-closing '<link … />' has no inner text.
+  if substring($Xml, $GtPos - 1, 1) = '/' then
+    return '';
+  end if;
+  declare $Close integer = find($Xml, '</' + $Tag + '>', $GtPos);
+  if $Close < 0 then
+    return '';
+  end if;
+  set $Out = substring($Xml, $GtPos + 1, $Close - $GtPos - 1);
+  return $Out;
+end;
+/
+
+/**
+ * The href of the first <link …> in Xml — Atom's link form.
+ *
+ * @param $Xml The XML fragment to search
+ * @returns The href value, or ''
+ */
+create or replace microflow Feedline.SUB_LinkHref (
+  $Xml: string
+)
+returns string as $Out
+folder 'Fetch/Text'
+begin
+  declare $Out string = '';
+  declare $Open integer = find($Xml, '<link');
+  if $Open < 0 then
+    return '';
+  end if;
+  declare $Href integer = find($Xml, 'href="', $Open);
+  if $Href < 0 then
+    return '';
+  end if;
+  declare $Start integer = $Href + 6;
+  declare $End integer = find($Xml, '"', $Start);
+  if $End < 0 then
+    return '';
+  end if;
+  set $Out = substring($Xml, $Start, $End - $Start);
+  return $Out;
+end;
+/
+
+/**
+ * Parse an RFC-822 date — the RSS <pubDate> form.
+ *
+ * Callers invoke this with `on error continue` so an unparseable date leaves
+ * the result empty instead of aborting the whole fetch.
+ *
+ * @param $Raw e.g. 'Sun, 26 Jul 2026 18:23:06 +0000'
+ * @returns The parsed instant
+ */
+create or replace microflow Feedline.SUB_ParseRfc822 (
+  $Raw: string
+)
+returns datetime as $Out
+folder 'Fetch/Text'
+begin
+  declare $Out datetime = parseDateTime(trim($Raw), 'EEE, dd MMM yyyy HH:mm:ss Z');
+  return $Out;
+end;
+/
+
+/**
+ * Parse an ISO-8601 date — the Atom <updated>/<published> form.
+ *
+ * @param $Raw e.g. '2026-07-26T18:23:06Z'
+ * @returns The parsed instant
+ */
+create or replace microflow Feedline.SUB_ParseIso (
+  $Raw: string
+)
+returns datetime as $Out
+folder 'Fetch/Text'
+begin
+  -- Normalise the trailing 'Z' to '+0000' and drop the colon in '+02:00' so a
+  -- single pattern covers both spellings.
+  declare $N string = trim($Raw);
+  set $N = replaceAll($N, 'Z$', '+0000');
+  set $N = replaceAll($N, '([+-]\d{2}):(\d{2})$', '$1$2');
+  declare $Out datetime = parseDateTime($N, 'yyyy-MM-dd''T''HH:mm:ssZ');
+  return $Out;
+end;
+/
+
+/**
+ * The relative age label the list row shows ('now', '15h', '3d').
+ *
+ * @param $When The article's publication instant
+ * @returns A short label
+ */
+create or replace microflow Feedline.SUB_RelativeLabel (
+  $When: datetime
+)
+returns string as $Out
+folder 'Fetch/Text'
+begin
+  if $When = empty then
+    return 'new';
+  end if;
+  declare $H integer = round(hoursBetween($When, [%CurrentDateTime%]));
+  if $H < 1 then
+    return 'now';
+  end if;
+  if $H < 24 then
+    return toString($H) + 'h';
+  end if;
+  declare $D integer = round(($H - 12) div 24);
+  if $D < 1 then
+    set $D = 1;
+  end if;
+  return toString($D) + 'd';
+end;
+/
+
+/**
+ * Parse a feed date, trying RSS's RFC-822 form then Atom's ISO-8601.
+ *
+ * The two attempts live here rather than at the call site because
+ * `on error continue` is rejected inside a loop (CE0644) — this microflow is
+ * called from the item loop and must not throw.
+ *
+ * @param $Raw The raw <pubDate>/<updated> text
+ * @returns The parsed instant, or empty if neither form matched
+ */
+create or replace microflow Feedline.SUB_ParseFeedDate (
+  $Raw: string
+)
+returns datetime as $Out
+folder 'Fetch/Text'
+begin
+  if trim($Raw) = '' then
+    return empty;
+  end if;
+  $Rfc = call microflow Feedline.SUB_ParseRfc822(Raw = $Raw) on error continue;
+  if $Rfc != empty then
+    return $Rfc;
+  end if;
+  $Iso = call microflow Feedline.SUB_ParseIso(Raw = $Raw) on error continue;
+  return $Iso;
+end;
+/
