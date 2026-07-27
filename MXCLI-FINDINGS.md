@@ -13,7 +13,7 @@ they are not re-reported.
 
 | | |
 |---|---|
-| mxcli | Found on `8db91bc` / `0ef2446` / `2854532`. **All 13 verified fixed on `a4eb812` (PR 48).** |
+| mxcli | Found on `8db91bc` / `0ef2446` / `2854532`. **All 13 verified fixed on `a4eb812`, plus both follow-ups on `2296276` (PR 48).** |
 | Mendix | 11.12.1 (`mxbuild` + `mx` from the CDN) |
 | Engine | `modelsdk` (default) |
 | Platform | Linux x86-64, Go 1.26 toolchain, JDK 21 |
@@ -24,13 +24,16 @@ workaround, **low** = polish.
 
 ---
 
----
+## Status: the 13 reported findings are all fixed in PR 48
 
-## Status: all 13 fixed in PR 48
+Every finding was re-tested against PR 48 built from source, using the same
+reproduction recorded in each section — first at `a4eb812`, then re-checked at
+`2296276` after the PR was updated. All 13 are resolved and none regressed; the
+full `go test ./cmd/... ./mdl/...` suite passes on an uncached run at both
+commits.
 
-Every finding was re-tested against `a4eb812` (PR 48, built from source) using
-the same reproduction recorded in each section. All 13 are resolved; the full
-`go test ./cmd/... ./mdl/...` suite passes on an uncached run.
+Finding **14** below is new, found at `2296276` while testing one of the
+follow-up fixes.
 
 | # | Finding | Verified on `a4eb812` |
 |---|---|---|
@@ -48,18 +51,19 @@ the same reproduction recorded in each section. All 13 are resolved; the full
 | 12 | Docs said `content`, model has `Content` | ✅ corrected, with the parent-entity explanation |
 | 13 | `create or modify` destroyed all column data | ✅ marker row survived an identical re-apply, 0 sync commands |
 
-Two notes from the verification, neither blocking:
+Both follow-up notes from that round were also fixed, on `2296276`:
 
-- **`DESCRIBE PAGE` does not round-trip `placeholder`/`onchange`.** They are
-  written correctly — `PlaceholderTemplate` and `OnChangeAction` are both in the
-  `.mxunit`, and the running app shows the placeholder and re-queries on change
-  — but `DESCRIBE PAGE` omits them, so a round-trip is not a reliable way to
-  confirm the write landed.
-- **A JavaScript action's parameter name is not validated.** `OpenURL`'s
-  parameter is `Url`; writing `url = …` passes `check --references` and is
-  written as a dangling reference that only fails at build time with CE1613
-  *"The selected JavaScript action parameter … no longer exists"*. Case-checking
-  it at write time would have caught this immediately.
+- **`DESCRIBE PAGE` now round-trips `placeholder`/`onchange`** — it emits
+  `Placeholder: 'Search all articles'` and `OnChange: microflow …`, so a
+  round-trip is a usable way to confirm the write landed. ✅
+- **JavaScript/Java action parameter names are now validated** by
+  `check --references`, with a did-you-mean:
+  `javascript action NanoflowCommons.OpenURL has no parameter "url" — did you
+  mean "Url"? (declared parameters: Url)`. An unknown name gets the same
+  message without the suggestion. This turns a build-time CE1613 into an
+  immediate, actionable check error. ✅
+
+One new issue surfaced while testing the round-trip — **finding 14**, below.
 
 ---
 
@@ -538,7 +542,59 @@ finding empty URLs, not a network fault.
 
 ---
 
-## 14. Smaller things
+## 14. `DESCRIBE PAGE` output does not round-trip a non-string attribute binding
+
+**Severity: medium** — `DESCRIBE` is documented as round-trippable, and for any
+`dynamictext` bound to a non-string attribute, re-applying its output corrupts
+the page.
+
+Found on `2296276` while checking that the new `placeholder`/`onchange`
+round-trip actually round-trips. Dumping `Feedline.Reader` and re-applying the
+dump left the app with 6 build errors.
+
+**Isolated repro** — two text widgets, one bound to an integer attribute and one
+to a string:
+
+```sql
+create or replace page Feedline.ZRT (params: { $View: Feedline.ReaderView }, …) {
+  dataview dv (datasource: $View) {
+    dynamictext num (attribute: CountAll)    -- Integer
+    dynamictext str (attribute: ListTitle)   -- String
+  }
+}
+```
+
+`DESCRIBE PAGE Feedline.ZRT` emits:
+
+```sql
+dynamictext num (Content: '{1}', ContentParams: [{1} = toString($currentObject/CountAll)])   -- ❌
+dynamictext str (Content: '{1}', ContentParams: [{1} = ListTitle])                            -- ✅
+```
+
+The string binding comes back as a bare attribute name and round-trips
+correctly. The integer one comes back as the **rendered template expression**.
+Re-applying it makes mxcli treat `toString($currentObject/CountAll)` as an
+attribute *name*:
+
+```
+mxcli check … --references  → Check passed!
+mx check                    → [error] [CE1613] "The selected attribute
+                              'Feedline.ReaderView.toString($currentObject/CountAll)'
+                              no longer exists." at Text 'num'
+```
+
+On the real Reader page this hit all six non-string bindings at once — the four
+smart-view counters, the per-feed unread count, and the row word count.
+
+**Suggestion:** emit the bare attribute name when the ContentParam is exactly
+`toString(<attribute>)` — that is the form mxcli itself writes for a non-string
+`attribute:` binding, so the transform is already known on the write side.
+Failing that, `check --references` should reject an attribute name that is not a
+valid identifier, since that is cheap and would stop the corruption at the door.
+
+---
+
+## 15. Smaller things
 
 - **`mxcli new` copies a 111 MB binary into every project.** It is correctly
   gitignored, but it is a full copy per project. A wrapper script that resolves
@@ -559,6 +615,9 @@ finding empty URLs, not a network fault.
 Worth recording, since a findings list reads more negatively than the experience
 was — a complete, pixel-close app was built without opening Studio Pro once:
 
+- **The two follow-up fixes in `2296276` are exactly right.** The JS-action
+  parameter check even suggests the correct casing, which is the difference
+  between a five-second fix and a build cycle.
 - **The new microflow debugger (`2854532`) is excellent.** `mxcli debug
   activities <Flow>` lists the breakpoints by name and index, `break --activity
   '#19'` resolves the GUID for you, and `run --local --debug` wires the session
