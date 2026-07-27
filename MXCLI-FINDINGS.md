@@ -13,7 +13,7 @@ they are not re-reported.
 
 | | |
 |---|---|
-| mxcli | Found on `8db91bc` / `0ef2446` / `2854532`. **All 13 verified fixed on `a4eb812`, plus both follow-ups on `2296276` (PR 48).** |
+| mxcli | Found on `8db91bc` / `0ef2446` / `2854532`. **All 14 verified fixed in PR 48, final at `671c145`.** |
 | Mendix | 11.12.1 (`mxbuild` + `mx` from the CDN) |
 | Engine | `modelsdk` (default) |
 | Platform | Linux x86-64, Go 1.26 toolchain, JDK 21 |
@@ -24,18 +24,18 @@ workaround, **low** = polish.
 
 ---
 
-## Status: the 13 reported findings are all fixed in PR 48
+## Status: all 14 findings fixed in PR 48
 
 Every finding was re-tested against PR 48 built from source, using the same
-reproduction recorded in each section — first at `a4eb812`, then re-checked at
-`2296276` after the PR was updated. All 13 are resolved and none regressed; the
-full `go test ./cmd/... ./mdl/...` suite passes on an uncached run at both
-commits.
+reproduction recorded in each section, across three revisions of the PR:
+`a4eb812` → `2296276` → `671c145`. All 14 are resolved, and each round was
+re-checked for regressions against the earlier ones — none regressed.
 
-Finding **14** below is new, found at `2296276` while testing one of the
-follow-up fixes.
+Findings 1–13 were reported from the app build. Finding 14 was found *during*
+verification, by round-tripping a page rather than only reading the DESCRIBE
+output — worth noting as a technique, since the surface fix looked correct.
 
-| # | Finding | Verified on `a4eb812` |
+| # | Finding | Verified |
 |---|---|---|
 | 1 | `alter page … set` on built-in widgets | ✅ `Altered page Feedline.Reader` |
 | 2 | Reserved words as widget-argument names | ✅ `Source:` parses unquoted |
@@ -50,8 +50,9 @@ follow-up fixes.
 | 11 | `call javascript action` persisted as empty | ✅ round-trips; "Open original" opens the real URL |
 | 12 | Docs said `content`, model has `Content` | ✅ corrected, with the parent-entity explanation |
 | 13 | `create or modify` destroyed all column data | ✅ marker row survived an identical re-apply, 0 sync commands |
+| 14 | `DESCRIBE PAGE` corrupted non-string bindings | ✅ `671c145` — bare attribute name; full page round-trip is clean |
 
-Both follow-up notes from that round were also fixed, on `2296276`:
+The two follow-up notes from the `a4eb812` round were fixed on `2296276`:
 
 - **`DESCRIBE PAGE` now round-trips `placeholder`/`onchange`** — it emits
   `Placeholder: 'Search all articles'` and `OnChange: microflow …`, so a
@@ -63,7 +64,13 @@ Both follow-up notes from that round were also fixed, on `2296276`:
   message without the suggestion. This turns a build-time CE1613 into an
   immediate, actionable check error. ✅
 
-One new issue surfaced while testing the round-trip — **finding 14**, below.
+and finding **14** — which that round-trip test then exposed — was fixed on
+`671c145`.
+
+**Flaky test, unrelated to any of this:** `TestWatcherDebounce`
+(`cmd/mxcli/tui`) failed once under load with *"expected 1 debounced message,
+got 2"*, then passed 4/4 on re-run with the machine idle. It is timing
+sensitive and no commit in this PR touches `tui`.
 
 ---
 
@@ -544,9 +551,13 @@ finding empty URLs, not a network fault.
 
 ## 14. `DESCRIBE PAGE` output does not round-trip a non-string attribute binding
 
-**Severity: medium** — `DESCRIBE` is documented as round-trippable, and for any
-`dynamictext` bound to a non-string attribute, re-applying its output corrupts
-the page.
+**Severity: medium — ✅ FIXED in `671c145`.** `DESCRIBE` now emits the bare
+attribute name, and a full dump-and-re-apply of the 396-line Reader page leaves
+`mx check` at 0 errors with every property intact (placeholder, onchange, the
+nanoflow action, all 14 `DynamicClasses`). The original report follows.
+
+`DESCRIBE` is documented as round-trippable, and for any `dynamictext` bound to
+a non-string attribute, re-applying its output corrupted the page.
 
 Found on `2296276` while checking that the new `placeholder`/`onchange`
 round-trip actually round-trips. Dumping `Feedline.Reader` and re-applying the
