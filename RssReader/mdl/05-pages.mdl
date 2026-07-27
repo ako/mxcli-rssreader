@@ -91,6 +91,13 @@ create or replace page Feedline.AddFeed
         content: 'Paste a feed URL or a site address — autodiscovery will look for a linked feed. Import an OPML file to add many at once.',
         class: 'fl-field-help'
       )
+      -- Validation actually fetches the URL now, so it can actually fail;
+      -- this is where it says why (unreachable, HTTP error, not a feed).
+      dynamictext urlError (
+        attribute: DetectedError,
+        class: 'fl-field-error',
+        visible: [DetectedError != '']
+      )
       container stepOneActions (class: 'fl-actions-row') {
         actionbutton btnValidate (caption: 'Validate feed', action: microflow Feedline.ACT_ValidateFeed, class: 'fl-btn fl-btn--accent')
         actionbutton btnOpml (caption: 'Import OPML…', action: close_page, class: 'fl-btn fl-btn--ghost')
@@ -146,7 +153,7 @@ create or replace page Feedline.ManageFeeds
   container gridHead (class: 'fl-grid-head') {
     dynamictext colFeed (content: 'Feed')
     dynamictext colTags (content: 'Source tags')
-    dynamictext colRefresh (content: 'Refresh')
+    dynamictext colRefresh (content: 'Last fetch')
     dynamictext colCount (content: 'Articles', class: 'fl-grid-count')
   }
 
@@ -168,7 +175,9 @@ create or replace page Feedline.ManageFeeds
               }
             }
           }
-          dynamictext mInterval (attribute: RefreshInterval, class: 'fl-grid-interval')
+          -- How the last fetch went, per feed — more useful than the static
+          -- 'Manual only' interval now that Refresh really fetches.
+          dynamictext mInterval (attribute: LastFetchStatus, class: 'fl-grid-interval')
           dynamictext mCount (attribute: ArticleCount, class: 'fl-grid-count')
         }
       }

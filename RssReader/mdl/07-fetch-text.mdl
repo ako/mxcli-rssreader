@@ -11,9 +11,14 @@
 /**
  * Decode the XML/HTML entities that actually show up in feed titles.
  *
- * Numeric references are handled for the few that matter (curly quotes, dashes)
- * rather than exhaustively — anything left over renders as-is, which is a
- * better failure mode than dropping the text.
+ * Both numeric forms are handled: decimal (&#8217;) and hexadecimal (&#x27;).
+ * Hex is not a rare curiosity — WordPress and the Hacker News firehose emit
+ * &#x27; for a plain apostrophe, which is why raw entity text was leaking into
+ * article titles before this covered it.
+ *
+ * The list is the references that actually appear in feeds rather than the
+ * full HTML5 set; anything left over renders as-is, which is a better failure
+ * mode than dropping the text.
  *
  * @param $S Raw text
  * @returns Decoded text
@@ -25,21 +30,77 @@ returns string as $Out
 folder 'Fetch/Text'
 begin
   declare $Out string = $S;
+  -- Hex references are case-insensitive in both the 'x' and the digits, so
+  -- normalise once instead of listing every spelling below.
+  set $Out = replaceAll($Out, '&#X', '&#x');
+  set $Out = replaceAll($Out, '&#x0*27;', '''');
+  set $Out = replaceAll($Out, '&#x0*2019;', '''');
+  set $Out = replaceAll($Out, '&#x0*2018;', '''');
+  set $Out = replaceAll($Out, '&#x0*201[Cc];', '“');
+  set $Out = replaceAll($Out, '&#x0*201[Dd];', '”');
+  set $Out = replaceAll($Out, '&#x0*2013;', '–');
+  set $Out = replaceAll($Out, '&#x0*2014;', '—');
+  set $Out = replaceAll($Out, '&#x0*2026;', '…');
+  set $Out = replaceAll($Out, '&#x0*22;', '"');
+  set $Out = replaceAll($Out, '&#x0*[Aa]0;', ' ');
+  set $Out = replaceAll($Out, '&#x0*3[Cc];', '<');
+  set $Out = replaceAll($Out, '&#x0*3[Ee];', '>');
+  -- &#x26; last among the hex forms, for the same reason as &amp; below.
+  set $Out = replaceAll($Out, '&#x0*26;', '&');
   set $Out = replaceAll($Out, '&#8217;', '''');
   set $Out = replaceAll($Out, '&#8216;', '''');
   set $Out = replaceAll($Out, '&#8220;', '“');
   set $Out = replaceAll($Out, '&#8221;', '”');
   set $Out = replaceAll($Out, '&#8211;', '–');
   set $Out = replaceAll($Out, '&#8212;', '—');
+  set $Out = replaceAll($Out, '&#8230;', '…');
+  set $Out = replaceAll($Out, '&#160;', ' ');
   set $Out = replaceAll($Out, '&#39;', '''');
+  set $Out = replaceAll($Out, '&#34;', '"');
   set $Out = replaceAll($Out, '&apos;', '''');
   set $Out = replaceAll($Out, '&quot;', '"');
   set $Out = replaceAll($Out, '&nbsp;', ' ');
+  set $Out = replaceAll($Out, '&hellip;', '…');
+  set $Out = replaceAll($Out, '&rsquo;', '''');
+  set $Out = replaceAll($Out, '&lsquo;', '''');
+  set $Out = replaceAll($Out, '&ldquo;', '“');
+  set $Out = replaceAll($Out, '&rdquo;', '”');
+  set $Out = replaceAll($Out, '&ndash;', '–');
+  set $Out = replaceAll($Out, '&mdash;', '—');
   set $Out = replaceAll($Out, '&lt;', '<');
   set $Out = replaceAll($Out, '&gt;', '>');
   -- &amp; last, so a double-encoded &amp;lt; resolves in the right order.
   set $Out = replaceAll($Out, '&amp;', '&');
   return $Out;
+end;
+/
+
+/**
+ * The display host for a feed URL — scheme, 'www.' and path removed.
+ *
+ * Used to label a feed added through the wizard the way the seeded ones are
+ * labelled ("techcrunch.com" rather than the full feed URL).
+ *
+ * @param $Url A feed or site URL
+ * @returns The bare host, or the input trimmed if it does not look like a URL
+ */
+create or replace microflow Feedline.SUB_HostFromUrl (
+  $Url: string
+)
+returns string as $Out
+folder 'Fetch/Text'
+begin
+  declare $Out string = trim($Url);
+  set $Out = replaceAll($Out, '^[A-Za-z][A-Za-z0-9+.-]*://', '');
+  set $Out = replaceAll($Out, '^www\.', '');
+  declare $Slash integer = find($Out, '/');
+  if $Slash > 0 then
+    set $Out = substring($Out, 0, $Slash);
+  end if;
+  -- Strip any userinfo/port that survived.
+  set $Out = replaceAll($Out, '^[^@]*@', '');
+  set $Out = replaceAll($Out, ':[0-9]+$', '');
+  return toLowerCase($Out);
 end;
 /
 

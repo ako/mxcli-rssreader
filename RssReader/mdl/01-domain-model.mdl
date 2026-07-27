@@ -140,7 +140,13 @@ create or modify non-persistent entity Feedline.ReaderView (
   Toast: string(200),
   NewFeedUrl: string(500),
   NewFeedStep: integer default 0,
-  DetectedTitle: string(200)
+  -- What the add-feed wizard reports back after actually fetching the URL:
+  -- DetectedTitle is the human summary line, DetectedFeedName/DetectedHost are
+  -- what the Source is created from once the user confirms.
+  DetectedTitle: string(200),
+  DetectedFeedName: string(200),
+  DetectedHost: string(200),
+  DetectedError: string(200)
 );
 /
 

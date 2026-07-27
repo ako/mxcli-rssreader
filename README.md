@@ -27,9 +27,10 @@ RssReader/
     04-view-wrappers.mdl    per-view wrappers + the add-feed wizard steps
     05-pages.mdl            Reader + the four popup sheets
     06-navigation.mdl       home microflow, after-startup hook, database config
-    07-fetch-text.mdl       XML/entity/date helpers for the parser
+    07-fetch-text.mdl       XML/entity/date/URL helpers for the parser
     08-fetch-feeds.mdl      the REST fetch, the RSS/Atom walk, dedupe
-    09-open-original.mdl    the Manage sheet's Last fetch column
+    09-add-feed.mdl         the add-feed wizard, wired to the fetcher
+  tests/                    Playwright end-to-end tests (see tests/README.md)
   theme/web/_feedline.scss  the design's tokens and components
   RssReader.mpr             the model (MPR v2, sources in mprcontents/)
 scripts/setup-tools.sh      toolchain bootstrap (see TOOLING.md)
@@ -87,6 +88,14 @@ a `while` loop over the raw body. No Java action, no import mapping, and no XSD 
 which is deliberate: a schema-driven parser would not survive the malformed
 feeds that make up much of the real web.
 
+**Adding a feed fetches it too.** The wizard's *Validate feed* really requests
+the URL and reports what came back — the feed's own `<title>`, its dialect and
+its item count on success; an unreachable host, an HTTP status, or "that is not
+an RSS or Atom feed" on failure. Confirming creates the subscription named
+after the feed rather than after the URL and pulls the first batch immediately,
+so a new feed never sits in the sidebar looking empty. Re-adding a feed already
+subscribed is a no-op.
+
 Per-feed outcomes are recorded on `Source.LastFetchStatus` and shown in the
 **Last fetch** column of Manage feeds & tags, so a failure is visible in the UI
 rather than silent. A typical run in this sandbox:
@@ -120,14 +129,28 @@ Unread and tagged counts are denormalised onto `Source`/`Tag` and recalculated
 by `ACT_RecalculateCounts`, so sidebar rows bind an attribute instead of needing
 an aggregate each.
 
+## Testing
+
+`tests/` drives the running app with Playwright — 32 assertions across the
+whole surface (views, chips, feed selection, search, read/star/save, tagging,
+add feed, manage sheet, shortcuts, mark-all-read, refresh, open original), plus
+focused suites for the add-feed failure paths and the tag sheet. See
+[tests/README.md](RssReader/tests/README.md) — the tests mutate real data, so
+reset state between runs.
+
 ## Known gaps against the prototype
 
 - **Keyboard shortcuts are documented, not bound.** Mendix has no page-level key
   handler; the shortcuts sheet lists the map and every shortcut has a button.
-- **Fetching is manual only.** Refresh is a button, as in the design; there is
-  no scheduled event. Adding one is a few lines if wanted.
+- **Refresh is manual.** A button, as in the design; there is no scheduled
+  event. Adding one is a few lines if wanted.
 - **Only fetched articles have a source URL.** The twelve seeded demo articles
-  are fictional, so "Open original" is a no-op on those.
+  are fictional, so "Open original" is a no-op on those. It replaces the current
+  tab rather than opening a new one — that is what `NanoflowCommons.OpenURL`
+  does.
+- **Import OPML is a stub.** The button is in the design; it closes the sheet.
+- **The article list pages at 20.** Mendix's listview renders a page plus a
+  `Load more` button, which the theme leaves in Atlas's default styling.
 - **IBM Plex is imported from Google Fonts**, which the sandbox blocks, so
   screenshots taken here fall back to system fonts. Colour and layout are
   unaffected.
