@@ -274,8 +274,13 @@ create or replace page Feedline.Reader
       }
 
       container searchBox (class: 'fl-search') {
-        textbox txtQuery (label: 'Search', attribute: Query)
-        actionbutton btnSearch (caption: '/', action: microflow Feedline.ACT_ApplyQuery, class: 'fl-search-key')
+        textbox txtQuery (
+          label: 'Search',
+          attribute: Query,
+          placeholder: 'Search all articles',
+          onchange: microflow Feedline.ACT_ApplyQuery
+        )
+        dynamictext searchKey (content: '/', class: 'fl-search-key')
       }
 
       container topRight (class: 'fl-topbar-right') {
@@ -537,9 +542,14 @@ create or replace page Feedline.Reader
               class: 'fl-btn fl-btn--ghost',
               visible: [IsRead]
             )
+            actionbutton btnAddTag (caption: '＋ Add tag', action: show_page Feedline.TagSheet, class: 'fl-btn fl-btn--push')
+            -- Inside the DataView so the nanoflow receives the open article.
+            actionbutton btnOpenOriginal (
+              caption: '↗ Open original',
+              action: nanoflow Feedline.NF_OpenOriginal("Article": $currentObject),
+              class: 'fl-btn fl-btn--ghost'
+            )
           }
-          actionbutton btnAddTag (caption: '＋ Add tag', action: show_page Feedline.TagSheet, class: 'fl-btn fl-btn--push')
-          actionbutton btnOpenOriginal (caption: '↗ Open original', action: show_page Feedline.Shortcuts, class: 'fl-btn fl-btn--ghost')
         }
 
         container detailScroll (class: 'fl-detail-scroll') {

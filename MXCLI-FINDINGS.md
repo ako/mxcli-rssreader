@@ -13,7 +13,7 @@ they are not re-reported.
 
 | | |
 |---|---|
-| mxcli | `8db91bc` items 1–10, `0ef2446` items 11–12, `2854532` item 13 (all built from `ako/mxcli` `main`) |
+| mxcli | Found on `8db91bc` / `0ef2446` / `2854532`. **All 13 verified fixed on `a4eb812` (PR 48).** |
 | Mendix | 11.12.1 (`mxbuild` + `mx` from the CDN) |
 | Engine | `modelsdk` (default) |
 | Platform | Linux x86-64, Go 1.26 toolchain, JDK 21 |
@@ -21,6 +21,45 @@ they are not re-reported.
 Severity is about impact on authoring an app in MDL: **high** = blocks a
 documented workflow, **medium** = costs real debugging time or forces a
 workaround, **low** = polish.
+
+---
+
+---
+
+## Status: all 13 fixed in PR 48
+
+Every finding was re-tested against `a4eb812` (PR 48, built from source) using
+the same reproduction recorded in each section. All 13 are resolved; the full
+`go test ./cmd/... ./mdl/...` suite passes on an uncached run.
+
+| # | Finding | Verified on `a4eb812` |
+|---|---|---|
+| 1 | `alter page … set` on built-in widgets | ✅ `Altered page Feedline.Reader` |
+| 2 | Reserved words as widget-argument names | ✅ `Source:` parses unquoted |
+| 3 | Parse error pointed at the wrong token | ✅ moot — the #2 repro no longer errors |
+| 4 | `check` missed association traversal | ✅ new rule **MDL-WIDGET13** flags it |
+| 5 | CE0111 missed on the `create` path | ✅ fixed earlier, in `2854532` |
+| 6 | Multi-line string hint blamed apostrophes | ✅ *"A string literal is not terminated before the end of the line"* |
+| 7 | MDL044 suggested `round()` for `count()` | ✅ *"Assign it to a variable first: `$n = count($List);`"* |
+| 8 | MDL001 suggested syntax that would not compile | ✅ now suggests `FIND($List, …)`, which I confirmed compiles and builds |
+| 9 | `textbox` dropped `placeholder` / `onchange` | ✅ both persist; live search verified in the browser |
+| 10 | Generated `CLAUDE.md` contradicted the skills | ✅ `DECLARE $Entity`/`$List` moved to "NOT supported"; CASE listed as supported |
+| 11 | `call javascript action` persisted as empty | ✅ round-trips; "Open original" opens the real URL |
+| 12 | Docs said `content`, model has `Content` | ✅ corrected, with the parent-entity explanation |
+| 13 | `create or modify` destroyed all column data | ✅ marker row survived an identical re-apply, 0 sync commands |
+
+Two notes from the verification, neither blocking:
+
+- **`DESCRIBE PAGE` does not round-trip `placeholder`/`onchange`.** They are
+  written correctly — `PlaceholderTemplate` and `OnChangeAction` are both in the
+  `.mxunit`, and the running app shows the placeholder and re-queries on change
+  — but `DESCRIBE PAGE` omits them, so a round-trip is not a reliable way to
+  confirm the write landed.
+- **A JavaScript action's parameter name is not validated.** `OpenURL`'s
+  parameter is `Url`; writing `url = …` passes `check --references` and is
+  written as a dangling reference that only fails at build time with CE1613
+  *"The selected JavaScript action parameter … no longer exists"*. Case-checking
+  it at write time would have caught this immediately.
 
 ---
 

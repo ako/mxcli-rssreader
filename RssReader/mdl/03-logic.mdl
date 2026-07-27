@@ -777,3 +777,32 @@ begin
   return true;
 end;
 /
+
+/**
+ * Open the active article's own URL in a new browser tab.
+ *
+ * Client-side by necessity: opening a link is a browser action, so this is a
+ * nanoflow rather than a microflow. It takes the article as a parameter rather
+ * than retrieving it over ReaderView_ActiveArticle — a nanoflow has no
+ * database access, and that association retrieve comes back empty client-side.
+ *
+ * The parameter is `Url`, capitalised — that is the JavaScript action
+ * document's parameter name, not the JS function's argument name (`url`).
+ * Getting it wrong writes a reference that only fails at build time (CE1613).
+ *
+ * @param $Article The article to open
+ * @returns true when a URL was opened
+ */
+create or replace nanoflow Feedline.NF_OpenOriginal (
+  $Article: Feedline.Article
+)
+returns boolean as $ok
+folder 'Logic'
+begin
+  if $Article = empty or trim($Article/Link) = '' then
+    return false;
+  end if;
+  $Opened = call javascript action NanoflowCommons.OpenURL(Url = $Article/Link);
+  return $Opened;
+end;
+/

@@ -1,13 +1,14 @@
 -- ---------------------------------------------------------------------------
 -- Feedline domain model
 --
--- NOTE: this script is deliberately NOT re-runnable against a project that
--- already has these entities. `mxcli check --references` suggests switching to
--- `create or modify` to make it idempotent — do not. An identical
--- `create or modify persistent entity` reassigns the attributes' identities, so
--- the next runtime start drops and re-adds every column and silently wipes the
--- data (verified; see MXCLI-FINDINGS.md #13). Change the model with
--- `alter entity … add/drop attribute` instead.
+-- Re-runnable: `create or modify` preserves attribute identity as of mxcli
+-- a4eb812 (PR 48), so re-applying this script against an existing project is a
+-- no-op rather than a schema rewrite. On earlier builds it silently emptied
+-- every column — see MXCLI-FINDINGS.md #13.
+--
+-- Because `create or modify` is authoritative, this file must list EVERY
+-- attribute. An attribute added later by `alter entity` and not repeated here
+-- would be dropped the next time this script runs.
 --
 -- Mirrors the "RSS Reader" design prototype:
 --   Source   ⇢ SourceTag  (many-to-many, groups feeds in the sidebar)
@@ -26,7 +27,7 @@ create module Feedline;
 /**
  * Which slice of articles the middle pane is showing.
  */
-create enumeration Feedline.ViewKind (
+create or modify enumeration Feedline.ViewKind (
   All 'All articles',
   Unread 'Unread',
   Starred 'Starred',
@@ -40,7 +41,7 @@ create enumeration Feedline.ViewKind (
  * A grouping label for feeds (Tech, Dev, Low-code, ...). Shown as the chip row
  * at the top of the sidebar.
  */
-create persistent entity Feedline.SourceTag (
+create or modify persistent entity Feedline.SourceTag (
   Name: string(50) not null,
   SortOrder: integer default 0
 );
@@ -53,13 +54,16 @@ create persistent entity Feedline.SourceTag (
  * per source, selected with a DynamicClasses expression (a widget cannot carry
  * a computed inline style).
  */
-create persistent entity Feedline.Source (
+create or modify persistent entity Feedline.Source (
   Name: string(100) not null,
   Host: string(200),
   FeedUrl: string(500),
   Mono: string(4),
   Slug: string(40),
   RefreshInterval: string(50) default 'Manual only',
+  -- Outcome of the last fetch, shown in Manage feeds & tags.
+  LastFetchStatus: string(200) default 'never fetched',
+  LastFetchNew: integer default 0,
   UnreadCount: integer default 0,
   ArticleCount: integer default 0,
   TagLine: string(200),
@@ -72,7 +76,7 @@ create persistent entity Feedline.Source (
  * be renamed, counted and coloured — the point the prototype's "The tag is the
  * interface" article makes.
  */
-create persistent entity Feedline.Tag (
+create or modify persistent entity Feedline.Tag (
   Name: string(50) not null,
   Slug: string(40),
   ArticleCount: integer default 0,
@@ -83,7 +87,7 @@ create persistent entity Feedline.Tag (
 /**
  * A fetched article.
  */
-create persistent entity Feedline.Article (
+create or modify persistent entity Feedline.Article (
   Title: string(300) not null,
   Excerpt: string(1000),
   -- The detail pane renders the body as separate <p> blocks, so each paragraph
@@ -97,6 +101,12 @@ create persistent entity Feedline.Article (
   -- association (CE0117), and the badge tint is picked by a DynamicClasses
   -- expression on the article itself.
   SourceSlug: string(40),
+  -- The article's own URL, from <link> (RSS) or <link href="…"> (Atom).
+  -- Doubles as the dedupe key across refreshes.
+  Link: string(1000),
+  -- Raw <pubDate>/<updated> text, kept so a parse failure is diagnosable
+  -- rather than silently becoming "now".
+  PubDateRaw: string(100),
   Minutes: integer default 0,
   Words: integer default 0,
   IsRead: boolean default false,
@@ -113,7 +123,7 @@ create persistent entity Feedline.Article (
  * Screen state for the reader: which view is selected, the search box, the
  * active article and the sidebar filter. Non-persistent — one per session.
  */
-create non-persistent entity Feedline.ReaderView (
+create or modify non-persistent entity Feedline.ReaderView (
   Kind: Feedline.ViewKind default All,
   Query: string(200),
   ListTitle: string(200),
@@ -139,7 +149,7 @@ create non-persistent entity Feedline.ReaderView (
 /**
  * Every article comes from exactly one feed.
  */
-create association Feedline.Article_Source
+create or replace association Feedline.Article_Source
 from Feedline.Article to Feedline.Source
 type reference
 delete_behavior DELETE_AND_REFERENCES;
@@ -148,7 +158,7 @@ delete_behavior DELETE_AND_REFERENCES;
 /**
  * The shared tag layer: an article carries many tags, a tag spans many articles.
  */
-create association Feedline.Article_Tag
+create or replace association Feedline.Article_Tag
 from Feedline.Article to Feedline.Tag
 type reference_set
 owner both;
@@ -157,7 +167,7 @@ owner both;
 /**
  * Source tags group feeds in the sidebar.
  */
-create association Feedline.Source_SourceTag
+create or replace association Feedline.Source_SourceTag
 from Feedline.Source to Feedline.SourceTag
 type reference_set
 owner both;
@@ -166,7 +176,7 @@ owner both;
 /**
  * The article currently open in the detail pane.
  */
-create association Feedline.ReaderView_ActiveArticle
+create or replace association Feedline.ReaderView_ActiveArticle
 from Feedline.ReaderView to Feedline.Article
 type reference;
 /
@@ -174,7 +184,7 @@ type reference;
 /**
  * Set when the view is filtered to a single feed (Kind = Source).
  */
-create association Feedline.ReaderView_Source
+create or replace association Feedline.ReaderView_Source
 from Feedline.ReaderView to Feedline.Source
 type reference;
 /
@@ -182,7 +192,7 @@ type reference;
 /**
  * Set when the view is filtered to a single article tag (Kind = Tag).
  */
-create association Feedline.ReaderView_Tag
+create or replace association Feedline.ReaderView_Tag
 from Feedline.ReaderView to Feedline.Tag
 type reference;
 /
@@ -190,7 +200,7 @@ type reference;
 /**
  * The sidebar source-tag chip filter ("All" = empty).
  */
-create association Feedline.ReaderView_SourceTag
+create or replace association Feedline.ReaderView_SourceTag
 from Feedline.ReaderView to Feedline.SourceTag
 type reference;
 /

@@ -1,0 +1,25 @@
+-- ---------------------------------------------------------------------------
+-- The Manage sheet's Last fetch column.
+--
+-- "Open original" and the live search box are declared in 05-pages.mdl now that
+-- mxcli PR 48 makes them expressible (MXCLI-FINDINGS.md #9 and #11) — the page
+-- definition is the natural home for both, so neither needs patching here.
+-- ---------------------------------------------------------------------------
+
+/**
+ * The Manage sheet's "Refresh" column showed a static 'Manual only'. With real
+ * fetching it becomes the useful thing: how the last fetch went, per feed.
+ */
+alter page Feedline.ManageFeeds {
+  replace mInterval with {
+    dynamictext mInterval (attribute: LastFetchStatus, class: 'fl-grid-interval')
+  }
+};
+/
+
+-- `set … on <widget>` works again as of mxcli PR 48 (MXCLI-FINDINGS.md #1),
+-- so the header cell is a one-property edit rather than a whole-widget replace.
+alter page Feedline.ManageFeeds {
+  set content = 'Last fetch' on colRefresh;
+};
+/
