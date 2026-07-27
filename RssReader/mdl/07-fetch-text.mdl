@@ -107,8 +107,12 @@ end;
 /**
  * Turn a feed's HTML description into plain reading text.
  *
- * Strips CDATA wrappers and tags, decodes entities, and collapses the
- * whitespace that survives tag removal.
+ * Tags are stripped twice, on purpose. Feeds carry their markup in two forms:
+ * some put real tags in a CDATA block, others escape them, so the description
+ * arrives as '&lt;p&gt;&lt;a href="…"&gt;'. Stripping once and then decoding
+ * turns the escaped form back into visible '<p><a href="…">' text — which is
+ * exactly what Lobsters excerpts looked like before this. Strip, decode, strip
+ * again handles both without special-casing either.
  *
  * @param $S Raw description markup
  * @returns Plain text
@@ -124,7 +128,8 @@ begin
   set $T = replaceAll($T, '\]\]>', '');
   set $T = replaceAll($T, '<[^>]*>', ' ');
   $Decoded = call microflow Feedline.SUB_DecodeEntities(S = $T);
-  declare $Out string = replaceAll($Decoded, '\s+', ' ');
+  declare $Out string = replaceAll($Decoded, '<[^>]*>', ' ');
+  set $Out = replaceAll($Out, '\s+', ' ');
   return trim($Out);
 end;
 /
