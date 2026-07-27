@@ -18,11 +18,18 @@ new session comes up with the same tools at the same versions.
 
 ## Installed versions
 
-Verified on 2026-07-26.
+Verified on 2026-07-27.
+
+Two mxcli binaries are in play. `/usr/local/bin/mxcli` is what the
+`SessionStart` hook builds — `main` HEAD, currently `3e9a102`. `RssReader/mxcli`
+is pinned to the PR 48 build (`671c145`) because the app's MDL scripts depend on
+fixes that are not on `main` yet; see [MXCLI-FINDINGS.md](MXCLI-FINDINGS.md).
+Once PR 48 merges the two converge and the project-local copy can go.
 
 | Tool | Version | Location | Provenance |
 | --- | --- | --- | --- |
-| **mxcli** | `8db91bc` | `/usr/local/bin/mxcli` | built from source |
+| **mxcli** | `3e9a102` (`main`) | `/usr/local/bin/mxcli` | built from source |
+| **mxcli (project-local)** | `671c145` (PR 48) | `RssReader/mxcli` | built from source |
 | **MxBuild + `mx` validator** | 11.12.1 | `~/.mxcli/mxbuild/11.12.1/modeler/` | `mxcli setup mxbuild` |
 | **Mendix runtime** | 11.12.1 | `~/.mxcli/runtime/11.12.1/` | `mxcli setup mxruntime` |
 | **ANTLR** | 4.13.1 (pinned) | `/opt/antlr/antlr-4.13.1-complete.jar` | antlr.org download |
@@ -56,6 +63,10 @@ MXCLI_REF=8db91bc99a891133b844bc2d8e71d7117e5d7edb bash scripts/setup-tools.sh
 | --- | --- | --- |
 | 2026-07-26 | `57442ec` | initial pin |
 | 2026-07-26 | `8db91bc` | `INDEX name ON (cols)` in entity definitions (grammar change), typed design properties with `check` validation, XPath-arithmetic diagnostics, Atlas-first `migrate-design-prototype` skill |
+| 2026-07-26 | `0ef2446` | `mxcli debug` microflow debugger, `run --local --debug`, `.mxcli/runtime.log` teeing |
+| 2026-07-27 | `2854532` | logging and REST-call improvements |
+| 2026-07-27 | `a4eb812` → `671c145` | PR 48 — fixes for all 14 findings in [MXCLI-FINDINGS.md](MXCLI-FINDINGS.md); built into `RssReader/mxcli` |
+| 2026-07-27 | `3e9a102` | `main` moved on (PR 47, nightly design-property fix); PR 48 not merged yet |
 
 ## Notes on the pins
 
