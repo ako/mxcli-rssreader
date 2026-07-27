@@ -9,12 +9,46 @@ a sidebar of source-tag chips, smart views and feeds; a middle article list; and
 a serif reading pane — plus four overlays (tag sheet, add-feed wizard, manage
 feeds, keyboard shortcuts).
 
+![The reader](docs/screenshots/01-reader.png)
+
 | | |
 |---|---|
 | Mendix version | 11.12.1 |
 | App module | `Feedline` |
 | Project | `RssReader/RssReader.mpr` |
 | Validation | `mx check` — 0 errors |
+
+Everything below is the running app, not the prototype — the articles are real,
+fetched over HTTP from the ten seeded feeds.
+
+<table>
+<tr>
+<td width="50%"><a href="docs/screenshots/02-starred.png"><img src="docs/screenshots/02-starred.png" alt="The Starred view"></a></td>
+<td width="50%"><a href="docs/screenshots/06-tag-sheet.png"><img src="docs/screenshots/06-tag-sheet.png" alt="The tag sheet"></a></td>
+</tr>
+<tr>
+<td><b>Smart views.</b> Starred, Read later and Unread are counters kept on the
+reader state; <i>Clear</i> appears whenever a filter or query is active.</td>
+<td><b>Tagging.</b> Tags are first-class objects, so they carry a count and can
+be renamed. Clicking one attaches it; clicking it again detaches it.</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/03-add-feed.png"><img src="docs/screenshots/03-add-feed.png" alt="The add-feed wizard after validating a real feed"></a></td>
+<td><a href="docs/screenshots/04-add-feed-error.png"><img src="docs/screenshots/04-add-feed-error.png" alt="The add-feed wizard rejecting a URL that is not a feed"></a></td>
+</tr>
+<tr>
+<td><b>Add feed.</b> <i>Validate</i> really fetches: the title, dialect and item
+count come from the feed itself.</td>
+<td><b>…and really fails.</b> This URL redirects to a marketing page, so there
+is nothing to subscribe to and the wizard says so.</td>
+</tr>
+</table>
+
+![Manage feeds and tags](docs/screenshots/05-manage.png)
+
+**Manage feeds & tags** shows how the last fetch went per feed. The connection
+failures above are specific to this sandbox — see
+[Fetching real feeds](#fetching-real-feeds).
 
 ## Layout
 
@@ -151,6 +185,7 @@ reset state between runs.
 - **Import OPML is a stub.** The button is in the design; it closes the sheet.
 - **The article list pages at 20.** Mendix's listview renders a page plus a
   `Load more` button, which the theme leaves in Atlas's default styling.
-- **IBM Plex is imported from Google Fonts**, which the sandbox blocks, so
-  screenshots taken here fall back to system fonts. Colour and layout are
-  unaffected.
+- **IBM Plex is imported from Google Fonts.** Chromium has no outbound network
+  in the build sandbox, so the screenshots above were taken with the font files
+  fetched separately and served to the browser from disk. In a normal browser
+  the `@import` just works.

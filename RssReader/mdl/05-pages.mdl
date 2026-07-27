@@ -118,7 +118,7 @@ create or replace page Feedline.AddFeed
         }
       }
       dynamictext manualHelp (
-        content: 'Refresh stays manual for every feed — nothing is fetched until you tap Refresh.',
+        content: 'The first batch is fetched as soon as you add the feed. After that, refreshing stays manual.',
         class: 'fl-field-help'
       )
       container stepTwoActions (class: 'fl-actions-row') {

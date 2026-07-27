@@ -14,6 +14,26 @@ node tests/e2e.mjs                                    # in another
 | `e2e.mjs` | the whole surface: smart views, source-tag chips, feed selection, search, open/read/star/save, tagging, add feed, manage sheet, shortcuts, mark-all-read, refresh, open original |
 | `add-feed.mjs` | the add-feed wizard's failure paths — a non-feed URL, an unreachable host, a duplicate subscription — plus the happy path and entity decoding |
 | `tagging.mjs` | attach, create-and-attach, detach, and the tag sheet's per-tag counts |
+| `screenshots.mjs` | regenerates `docs/screenshots/` — stages read/starred/saved state, then captures the reader, the two add-feed outcomes, the manage sheet and the tag sheet |
+
+## Regenerating the screenshots
+
+`screenshots.mjs` serves IBM Plex from disk, because Chromium has no outbound
+network here and the theme `@import`s it from Google Fonts. Fetch the files
+first — `curl` *can* reach the network:
+
+```bash
+mkdir -p /tmp/feedline-fonts && cd /tmp/feedline-fonts
+curl -sA 'Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0' \
+  'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap' \
+  -o fonts.css
+for u in $(grep -o 'https://fonts.gstatic.com[^)]*' fonts.css | sort -u); do
+  curl -s "$u" -o "$(basename "$u")"
+done
+```
+
+Then `node tests/screenshots.mjs`. Captures are 2× and downsampled to 1600px
+wide afterwards; without that the six files come to 3.6 MB instead of 812 KB.
 
 ## Two things to know before reading a failure
 
