@@ -40,6 +40,11 @@ MXCLI-FINDINGS.md           bugs and improvement notes from building this app
 The `mdl/` scripts are the readable source of the app; the `.mpr` is what they
 produce. Re-running them in order against a blank project rebuilds it.
 
+Scripts 02–10 are idempotent and safe to re-run against an existing project.
+`01-domain-model.mdl` is not, deliberately — see the note at the top of that
+file: making it idempotent with `create or modify` destroys the data in every
+column (MXCLI-FINDINGS.md #13). Evolve the model with `alter entity` instead.
+
 ## Running it
 
 The `SessionStart` hook installs the toolchain (see [TOOLING.md](TOOLING.md)).

@@ -1,6 +1,14 @@
 -- ---------------------------------------------------------------------------
 -- Feedline domain model
 --
+-- NOTE: this script is deliberately NOT re-runnable against a project that
+-- already has these entities. `mxcli check --references` suggests switching to
+-- `create or modify` to make it idempotent — do not. An identical
+-- `create or modify persistent entity` reassigns the attributes' identities, so
+-- the next runtime start drops and re-adds every column and silently wipes the
+-- data (verified; see MXCLI-FINDINGS.md #13). Change the model with
+-- `alter entity … add/drop attribute` instead.
+--
 -- Mirrors the "RSS Reader" design prototype:
 --   Source   ⇢ SourceTag  (many-to-many, groups feeds in the sidebar)
 --   Article  ⇢ Source     (many-to-one)

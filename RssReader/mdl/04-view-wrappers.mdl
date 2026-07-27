@@ -12,7 +12,7 @@
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ViewAll (
+create or replace microflow Feedline.ACT_ViewAll (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -29,7 +29,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ViewUnread (
+create or replace microflow Feedline.ACT_ViewUnread (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -46,7 +46,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ViewStarred (
+create or replace microflow Feedline.ACT_ViewStarred (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -63,7 +63,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ViewSaved (
+create or replace microflow Feedline.ACT_ViewSaved (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -84,7 +84,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_ValidateFeed (
+create or replace microflow Feedline.ACT_ValidateFeed (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -106,7 +106,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_CommitFeed (
+create or replace microflow Feedline.ACT_CommitFeed (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok
@@ -143,7 +143,7 @@ end;
  * @param $View The reader state
  * @returns true
  */
-create microflow Feedline.ACT_DismissToast (
+create or replace microflow Feedline.ACT_DismissToast (
   $View: Feedline.ReaderView
 )
 returns boolean as $ok

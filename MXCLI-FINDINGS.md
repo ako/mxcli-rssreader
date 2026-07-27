@@ -13,7 +13,7 @@ they are not re-reported.
 
 | | |
 |---|---|
-| mxcli | `8db91bc` for items 1–10, `0ef2446` for items 11–12 (both built from `ako/mxcli` `main`) |
+| mxcli | `8db91bc` items 1–10, `0ef2446` items 11–12, `2854532` item 13 (all built from `ako/mxcli` `main`) |
 | Mendix | 11.12.1 (`mxbuild` + `mx` from the CDN) |
 | Engine | `modelsdk` (default) |
 | Platform | Linux x86-64, Go 1.26 toolchain, JDK 21 |
@@ -167,7 +167,10 @@ is bound to (`Article.SourceSlug`).
 
 ## 5. CE0111 (retrieve-then-reassign) is detected inconsistently
 
-**Severity: medium**
+**Severity: medium — ✅ FIXED in `2854532`.** Re-tested on the plain
+`create microflow` path: `mxcli check --references` now reports
+`duplicate variable name '$E' — create output variable is already declared in
+this scope (CE0111)`. The original report follows for context.
 
 The same microflow body is accepted or rejected depending on whether the
 statement is `create microflow` or `create or replace microflow`:
@@ -437,7 +440,66 @@ that an unknown member exists on a parent entity under a different case.
 
 ---
 
-## 13. Smaller things
+## 13. `create or modify persistent entity` silently destroys all column data
+
+**Severity: high** — this is data loss, and the new "already exists" validation
+in `2854532` actively recommends the command that causes it.
+
+`2854532` added a genuinely useful check: re-running a script whose entities
+already exist now fails instead of silently doing nothing. But the remedy it
+suggests is destructive:
+
+```
+statement 3: entity already exists in project: Feedline.SourceTag — use CREATE OR MODIFY to update it
+```
+
+Following that advice on this app's domain-model script wiped **every string
+value in the database**: 11 feeds with no name or URL, 98 articles with no title
+or link. The rows survived; every attribute value was gone.
+
+**Isolated repro** — an entity, a row, then an *identical* `create or modify`:
+
+```sql
+-- 1. create it, start the app so the table exists
+create persistent entity Feedline.ZTest ( Val: string(50) );
+
+-- 2. put a value in
+INSERT INTO "feedline$ztest" (id, val) VALUES (999000001, 'SURVIVE-ME');
+   → SELECT val …  ⇒  SURVIVE-ME
+
+-- 3. re-apply the SAME definition, byte for byte
+create or modify persistent entity Feedline.ZTest ( Val: string(50) );
+   → Modified entity: Feedline.ZTest
+
+-- 4. restart the runtime
+   → ConnectionBus: Executing 5 database synchronization command(s)...
+   → SELECT val …  ⇒  <NULL>          ❌ row count still 1
+```
+
+Nothing about the definition changed, so nothing should have been synchronised.
+The attribute's identity is evidently reassigned on `create or modify`, Mendix
+sees an unknown attribute plus a departed one, and the sync drops and re-adds
+the column. On the real domain model that was 160 synchronization commands.
+
+**Why this is worse than it looks:** the operation reports success
+(`Modified entity: …`), the model still validates (`mx check`: 0 errors), and
+the app still starts. The loss only surfaces the next time something reads the
+data. In this app it presented as "all 11 feeds failed" — the fetcher was
+finding empty URLs, not a network fault.
+
+**Suggestions**, in order of value:
+1. Preserve attribute identity when a `create or modify` attribute matches an
+   existing one by name and type. That makes the operation genuinely idempotent,
+   which is what the hint promises.
+2. Until then, change the hint. `use CREATE OR MODIFY to update it` should not be
+   suggested for a **persistent** entity without a warning; `alter entity … add /
+   drop attribute` is the safe way to evolve a table.
+3. Consider warning at exec time when `create or modify` on a persistent entity
+   would change attribute identities — the same way a destructive `drop` warns.
+
+---
+
+## 14. Smaller things
 
 - **`mxcli new` copies a 111 MB binary into every project.** It is correctly
   gitignored, but it is a full copy per project. A wrapper script that resolves
@@ -458,6 +520,19 @@ that an unknown member exists on a parent entity under a different case.
 Worth recording, since a findings list reads more negatively than the experience
 was — a complete, pixel-close app was built without opening Studio Pro once:
 
+- **The new microflow debugger (`2854532`) is excellent.** `mxcli debug
+  activities <Flow>` lists the breakpoints by name and index, `break --activity
+  '#19'` resolves the GUID for you, and `run --local --debug` wires the session
+  up at boot so no separate `enable` is needed. Breaking by name rather than raw
+  object ID is the right call and worked first time on a 26-activity microflow.
+- **`run --local` now tees the runtime log to `<projectDir>/.mxcli/runtime.log`.**
+  This closes a real gap — in the previous session there was no way to see the
+  Mendix server log at all. Startup, the after-startup microflow's own `log info`
+  output and the DB synchronization counts all land there, and the sync count is
+  what made finding #13 diagnosable.
+- **The "already exists" check added in `2854532` is a good idea.** It caught two
+  scripts in this repo that were not actually re-runnable. Only its suggested
+  remedy is wrong (finding #13).
 - **`mxcli check --references` caught most errors before the build.** MDL008
   (`else` on an enum split), MDL043/040/041/044, and MDL-WIDGET07 (silently
   dropped properties) each caught a real defect that would otherwise have
