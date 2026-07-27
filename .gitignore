@@ -36,7 +36,9 @@ node_modules/
 playwright-report/
 test-results/
 .playwright/
+# Throwaway captures from test runs — but docs/screenshots/ is a deliverable.
 screenshots/
+!docs/screenshots/
 *.log
 
 # --- Editors / OS ----------------------------------------------------------
