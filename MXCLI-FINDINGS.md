@@ -13,7 +13,7 @@ they are not re-reported.
 
 | | |
 |---|---|
-| mxcli | Found on `8db91bc` / `0ef2446` / `2854532`. **All 14 verified fixed in PR 48, final at `671c145`.** |
+| mxcli | Findings 1–14 found on `8db91bc` / `0ef2446` / `2854532`; **all 14 verified fixed in PR 48, final at `671c145`**. Findings 15–17 are new, against `348b9de` (PR 102, theming). |
 | Mendix | 11.12.1 (`mxbuild` + `mx` from the CDN) |
 | Engine | `modelsdk` (default) |
 | Platform | Linux x86-64, Go 1.26 toolchain, JDK 21 |
@@ -24,7 +24,7 @@ workaround, **low** = polish.
 
 ---
 
-## Status: all 14 findings fixed in PR 48
+## Status: findings 1–14 fixed in PR 48; 15–17 open against PR 102
 
 Every finding was re-tested against PR 48 built from source, using the same
 reproduction recorded in each section, across three revisions of the PR:
@@ -51,6 +51,9 @@ output — worth noting as a technique, since the surface fix looked correct.
 | 12 | Docs said `content`, model has `Content` | ✅ corrected, with the parent-entity explanation |
 | 13 | `create or modify` destroyed all column data | ✅ marker row survived an identical re-apply, 0 sync commands |
 | 14 | `DESCRIBE PAGE` corrupted non-string bindings | ✅ `671c145` — bare attribute name; full page round-trip is clean |
+| 15 | `theme remove` without a name removes nothing, exits 0 | 🔴 open — `348b9de` |
+| 16 | `theme apply` orphans the old block in `_mxcli-atlas-map.scss` | 🔴 open — `348b9de` |
+| 17 | Topbar language selector unreadable in every dark palette (1.13:1) | 🔴 open — `348b9de` |
 
 The two follow-up notes from the `a4eb812` round were fixed on `2296276`:
 
@@ -605,7 +608,193 @@ valid identifier, since that is cheap and would stop the corruption at the door.
 
 ---
 
-## 15. Smaller things
+# Theming (`mxcli theme`, PR 102) — findings 15–17
+
+Tested on `348b9de` against a fresh `mxcli new` project (Mendix 11.12.1) with a
+page of ordinary Atlas widgets — buttons across the style range, form inputs, a
+list, and the theme's own `num` / `pill` / `stat` / `density-compact` recipes.
+All three themes, both palettes, plus `apply` / `remove` / `--dry-run` /
+`--force` / `--variant` / `switcher install`.
+
+The feature is in good shape: the palettes are coherent, the fence mechanism
+protects local edits properly, SCSS hot-applies under `--watch`, and the
+switcher does what it says. Three defects below, one of them user-visible.
+
+---
+
+## 15. `mxcli theme remove` without a theme name removes nothing, and exits 0
+
+`theme remove` targets `signal` — the default — instead of the theme actually
+installed. On a project themed with anything else it reports every file as
+`unchanged`, exits 0, and leaves the theme fully in place.
+
+**Severity: high.** The documented invocation is the bare one
+(`mxcli theme remove -p app.mpr  # take it back out`), the failure is silent,
+and the exit code says success.
+
+Reproduction — a project with `ledger` installed:
+
+```
+$ mxcli theme remove -p ThemeProbe.mpr
+Theme 'signal'
+  unchanged theme/web/_mxcli-atlas-map.scss
+  unchanged theme/web/_mxcli-signal.scss
+  unchanged theme/web/custom-variables.scss
+  unchanged theme/web/main.scss
+  … (12 files, all unchanged)
+$ echo $?
+0
+$ grep -o 'mxcli:theme:begin [a-z]*' theme/web/main.scss
+mxcli:theme:begin ledger        # still there
+```
+
+Passing the name works perfectly, which localises the bug to the default:
+
+```
+$ mxcli theme remove ledger -p ThemeProbe.mpr
+Theme 'ledger'
+  removed   theme/web/_mxcli-atlas-map.scss
+  removed   theme/web/_mxcli-ledger.scss
+  removed   theme/web/custom-variables.scss
+  removed   theme/web/main.scss
+```
+
+`main.scss` and `custom-variables.scss` then `diff` byte-identical against
+their pre-theme originals, so the removal logic itself is correct — only the
+target selection is wrong. `remove` should read the installed theme from the
+`mxcli:theme:begin <name>` marker (which `apply` already does for two of the
+three files — see #16) and fail loudly if it finds none.
+
+---
+
+## 16. `theme apply <other>` orphans the previous theme's block in `_mxcli-atlas-map.scss`
+
+Switching themes correctly replaces the block in `custom-variables.scss` and
+`main.scss`, but in `_mxcli-atlas-map.scss` it appends the new block and leaves
+the old one, doubling the file.
+
+**Severity: medium.** Harmless today, because the Atlas map is byte-identical
+across the three themes — but it contradicts the documented invariant, and it is
+exactly the situation the invariant exists to prevent: *"Only one theme applies
+at a time — `theme apply` removes the previous one, because two themes mapping
+the same Atlas variables would fight in the cascade."*
+
+```
+after apply signal:  atlas-map [signal]           197 lines
+after apply ledger:  atlas-map [signal ledger]    395 lines   <- signal orphaned
+after apply console: atlas-map [signal console]   395 lines   <- ledger removed, signal still there
+after apply signal:  atlas-map [signal]           197 lines   <- collapses only because the new theme *is* signal
+```
+
+The moment two themes ship different Atlas maps, the orphan wins or loses by
+file order rather than by intent. It also compounds #15: apply a second theme,
+then run the documented bare `theme remove`, and the project is left themed with
+no error anywhere.
+
+---
+
+## 17. The topbar language selector is unreadable in every dark palette
+
+Contrast measured at the rendered pixels, all three themes, dark palette:
+
+| Theme | Light | Dark |
+|---|---|---|
+| signal | 17.79 | **1.13** |
+| ledger | 16.34 | **1.12** |
+| console | 18.32 | **1.13** |
+
+WCAG AA wants 4.5. At 1.13 the text is invisible rather than merely
+low-contrast — sampling the rendered PNG, the glyph pixels span luminance 13–17
+against a ground of 13, a range of 4 out of 255. (In the light palette the same
+band spans 24–246.)
+
+| | |
+|---|---|
+| ![light](docs/screenshots/theme-topbar-light.png) | ![dark](docs/screenshots/theme-topbar-dark.png) |
+| light — fine | dark — the selector is still there |
+
+**Severity: medium — user-visible, and it ships on by default** (`mxcli new`
+applies `signal` with `--variant auto`, so any developer on a dark OS sees it
+immediately).
+
+The theme knows about this hazard and guards against it — the guard just loses
+the cascade. `_mxcli-atlas-map.scss` has:
+
+```scss
+.current-language-text,          /* 0,1,0 */
+.mx-navigationbar .mx-text,
+.navbar .mx-text { color: inherit; }
+```
+
+but the rule that actually wins, per `CSS.getMatchedStylesForNode`, is Atlas's:
+
+```scss
+.navbar-brand .widget-language-selector .current-language-text,   /* 0,3,0 */
+.navbar-brand .widget-language-selector .language-arrow
+  { color: var(--bg-color-secondary, #fff); }
+```
+
+Atlas means the `#fff` fallback — it assumes a dark rail. The theme maps
+`--bg-color-secondary` to a surface colour, which happens to be white in the
+light palette (so light works by luck) and is `#161b22` in the dark palette.
+
+Worth noting that `color: inherit` is the wrong remedy even at the right
+specificity — I tried it, and it takes light from 17.79 to **1.00**, because the
+inherited colour is body ink and the rail is dark in both palettes. The rail has
+its own token. Verified fix, applied in `main.scss` outside the fence and
+re-measured:
+
+```scss
+.navbar-brand .widget-language-selector .current-language-text,
+.navbar-brand .widget-language-selector .language-arrow {
+  color: var(--mxt-rail-ink-active, var(--mxt-rail-ink));
+}
+```
+
+→ **17.79 light / 19.47 dark**, both AAA.
+
+This is a good advertisement for the docs' own advice: *"Absent and overridden
+look identical in the browser, and only one of them is a specificity problem."*
+Here it was neither absent nor a plain specificity miss — the guard named the
+right element but the wrong property source.
+
+---
+
+## Theming: what worked
+
+- **Fences do what they promise.** Editing `--mxt-brand` inside the block made
+  the next `apply` refuse, name the file, and offer `--force`; the edit
+  survived. `--force` then discarded it as documented. `apply` on an unchanged
+  theme reports `unchanged` for all 12 files.
+- **`--dry-run` writes nothing** — the installed theme was untouched after a
+  dry-run switch.
+- **`--variant dark` really bakes.** The app stayed dark under a light OS
+  preference; under `auto` the palette follows `prefers-color-scheme` with no
+  root class and no flash.
+- **The switcher works end to end.** `switcher install` created three JavaScript
+  actions and two nanoflows, `mx check` stayed at 0 errors, and with a button
+  wired the palette flipped, `localStorage['mxcli-theme']` was set, and the class
+  landed on `<html>` rather than the page container. The documented reload
+  limitation reproduces exactly as described — the value is stored but the app
+  goes back to following the OS.
+- **Fonts are vendored, not fetched.** This matters more than it sounds: the
+  three themes ship their woff2 files under `theme/web/mxcli-fonts/`, so they
+  render correctly in a sandbox with no outbound network. Feedline's own
+  `@import url(fonts.googleapis.com…)` does not — which is why this repo needs a
+  route-interception workaround to take honest screenshots.
+- **Applying a theme to a heavily customised project was non-destructive.**
+  Applied `signal` to Feedline (~1,400 lines of custom SCSS) and the design was
+  intact: layout, per-source tint classes, and the serif reading pane all
+  survived. One thing to be aware of rather than a defect: `apply` appends its
+  block at the end of `main.scss`, *after* any existing app-level `@import` —
+  Feedline's carries the comment "Imported last so it wins the cascade over
+  Atlas", which is no longer true afterwards. Nothing broke here because
+  Feedline's rules are higher-specificity `.fl-*` classes, but a project relying
+  on import order would want to check.
+
+---
+
+## 18. Smaller things
 
 - **`mxcli new` copies a 111 MB binary into every project.** It is correctly
   gitignored, but it is a full copy per project. A wrapper script that resolves
